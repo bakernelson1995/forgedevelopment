@@ -444,8 +444,11 @@ create policy notif_read on public.notifications for select to authenticated
 
 -- Nothing is readable without signing in.
 revoke all on all tables in schema public from anon;
-revoke execute on all functions in schema public from anon;
-grant execute on function public.acknowledge_report(uuid) to authenticated;
+-- Only the helpers the access rules need are callable; internal functions
+-- (like queuing emails) can't be called directly by anyone signed in.
+revoke execute on all functions in schema public from public, anon, authenticated;
+grant execute on function public.me(), public.is_admin(), public.coaches_athlete(uuid), public.guards_athlete(uuid),
+  public.can_see_athlete(uuid), public.can_see_person(uuid), public.acknowledge_report(uuid) to authenticated;
 
 -- ==========================================================================
 -- FIRST ADMIN — edit the name and email, then run this line once.
