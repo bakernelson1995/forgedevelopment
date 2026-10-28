@@ -648,7 +648,7 @@ function adminAthletes(){
     </div>
     <button class="btn primary" style="margin-top:12px" data-act="addathlete">Add athlete</button></div>
   <div class="card"><h3>All athletes</h3>${S.athletes.length?`<div class="tscroll"><table class="t"><thead><tr><th>Athlete</th><th>Coach</th><th>Subscription</th><th>Guardians</th></tr></thead><tbody>
-    ${S.athletes.map(a=>`<tr><td><b>${esc(a.name)}</b><div class="xs muted">${esc(a.style)} · ${esc(a.aff)}</div><div class="xs ${stagesDiffer(a)?'down-c':'muted'}">Stage: coach ${a.coachStage||'—'} · family ${a.familyStage||'—'}</div></td>
+    ${S.athletes.map(a=>`<tr><td><b>${esc(a.name)}</b> <button class="linkbtn" data-act="editathlete" data-id="${a.id}" aria-label="Edit ${esc(a.name)}’s profile">edit</button><div class="xs muted">${esc(a.style)} · ${esc(a.aff)}</div><div class="xs ${stagesDiffer(a)?'down-c':'muted'}">Stage: coach ${a.coachStage||'—'} · family ${a.familyStage||'—'}</div></td>
       <td><select data-aset="coach_id" data-id="${a.id}" aria-label="Coach for ${esc(a.name)}">${coachOpts(a.coach)}</select></td>
       <td><select data-aset="status" data-id="${a.id}" aria-label="Subscription for ${esc(a.name)}">${Object.entries(SUB_ST).map(([k,l])=>`<option value="${k}" ${a.status===k?'selected':''}>${l}</option>`).join('')}</select></td>
       <td>${(GUARDIANS[a.id]||[]).map(gd=>`<div class="sm">${esc(gd.name)} <span class="xs muted">· ${esc(gd.rel)}</span> <button class="linkbtn" data-act="unlink" data-a="${a.id}" data-g="${gd.id}" aria-label="Unlink ${esc(gd.name)}">unlink</button></div>`).join('')||'<span class="xs down-c">No guardian linked</span>'}
@@ -1035,6 +1035,26 @@ const ACT={
     run(async()=>{const [row]=await q(sb.from('athletes').insert({full_name:name,primary_style:val('na-style'),coach_id:val('na-coach')||null,affiliation:val('na-aff')||'Independent',coach_stage:val('na-stage')?Number(val('na-stage')):null,status:val('na-status')||'test'}).select('id'));
       const links=[[g1,val('na-r1')],[g2,val('na-r2')]].filter(([gid],i,arr)=>gid&&arr.findIndex(x=>x[0]===gid)===i).map(([gid,rel])=>({athlete_id:row.id,guardian_id:gid,relationship:rel||'Parent'}));
       if(links.length)await q(sb.from('athlete_guardians').insert(links).select('athlete_id'));log(null,'Added athlete — '+name)},name+' added')},
+  editathlete:t=>{const a=ath(t.dataset.id);
+    const coachOpts=`<option value="">— Family chooses —</option>`+S.coaches.filter(c=>c.active||c.id===a.coach).map(c=>`<option value="${c.id}" ${a.coach===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
+    modal(`<div class="mh"><h3>Edit ${esc(a.name)}’s profile</h3></div>
+      <div class="fgrid">
+        <div><label class="f" for="ea-name">Athlete name</label><input type="text" id="ea-name" value="${esc(a.name)}"></div>
+        <div><label class="f" for="ea-style">Primary style</label><select id="ea-style">${STYLES.map(x=>`<option ${a.style===x?'selected':''}>${x}</option>`).join('')}</select></div>
+        <div><label class="f" for="ea-aff">Home club or school</label><input type="text" id="ea-aff" value="${esc(a.aff)}"></div>
+        <div><label class="f" for="ea-coach">Primary coach</label><select id="ea-coach">${coachOpts}</select></div>
+        <div><label class="f" for="ea-stage">Stage (coach view)</label><select id="ea-stage"><option value="">— Not set —</option>${STAGES.map(st=>`<option value="${st.n}" ${a.coachStage===st.n?'selected':''}>${esc(stageName(st.n))}</option>`).join('')}</select></div>
+        <div><label class="f" for="ea-status">Subscription</label><select id="ea-status">${Object.entries(SUB_ST).map(([k,l])=>`<option value="${k}" ${a.status===k?'selected':''}>${l}</option>`).join('')}</select></div>
+      </div>
+      <div class="xs muted" style="margin-top:10px">Family’s stage view: ${a.familyStage?esc(stageName(a.familyStage)):'not picked yet'} (only the family can change it). Changing the primary style changes which style skills appear on future reports; published reports stay as they are.</div>
+      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" data-act="saveathlete" data-id="${a.id}">Save changes</button><button class="btn" data-act="closemodal">Cancel</button></div>`);
+    $('#ea-name')?.focus()},
+  saveathlete:t=>{const a=ath(t.dataset.id);const name=val('ea-name');if(!name){toast('Enter the athlete’s name');return}
+    const st=val('ea-stage')?Number(val('ea-stage')):null;
+    const upd={full_name:name,primary_style:val('ea-style'),affiliation:val('ea-aff')||'Independent',coach_id:val('ea-coach')||null,status:val('ea-status')||a.status};
+    if(st!==a.coachStage){upd.coach_stage=st;upd.coach_stage_at=st?new Date().toISOString():null}
+    $('#modal').innerHTML='';
+    run(async()=>{await q(sb.from('athletes').update(upd).eq('id',a.id).select('id'));log(null,'Edited athlete profile — '+name)},name+'’s profile saved')},
   link:t=>{const aid=t.dataset.id;const gid=val('lg-'+aid);if(!gid){toast('Choose a guardian');return}
     run(()=>q(sb.from('athlete_guardians').insert({athlete_id:aid,guardian_id:gid,relationship:val('lr-'+aid)||'Parent'}).select('athlete_id')),'Guardian linked')},
   unlink:t=>{const a=ath(t.dataset.a),gd=person(t.dataset.g);
