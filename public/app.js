@@ -540,7 +540,7 @@ function adminAthletes(){
 function adminPeople(){
   const ppl=S.people.slice().sort((a,b)=>a.role.localeCompare(b.role)||a.full_name.localeCompare(b.full_name));
   return `<div class="card" style="margin-bottom:16px"><h3>Add a person</h3>
-    <div class="sm muted" style="margin-bottom:12px">Anyone listed here can sign in with their email and a one-time code. Families only ever see the athletes linked to them.</div>
+    <div class="sm muted" style="margin-bottom:12px">Adding someone creates their sign-in and shows you a temporary password to share with them privately. Families only ever see the athletes linked to them.</div>
     <div class="fgrid">
       <div><label class="f" for="np-name">Full name</label><input type="text" id="np-name" placeholder="First Last"></div>
       <div><label class="f" for="np-email">Email</label><input type="email" id="np-email" placeholder="name@example.com"></div>
@@ -548,18 +548,17 @@ function adminPeople(){
       <div><label class="f" for="np-phone">Phone (optional)</label><input type="text" id="np-phone" placeholder="(815) 555-0100"></div>
       <div class="full"><label style="display:flex;gap:8px;align-items:center;font-size:13.5px"><input type="checkbox" id="np-coach"> Administrator also coaches athletes</label></div>
     </div>
-    <button class="btn primary" style="margin-top:12px" data-act="addperson">Add person</button></div>
+    <button class="btn primary" style="margin-top:12px" data-act="addperson">Add person & create sign-in</button></div>
   <div class="card"><h3>Everyone with access</h3><div class="tscroll"><table class="t"><thead><tr><th>Name</th><th>Email</th><th>Role</th><th>Access</th></tr></thead><tbody>
     ${ppl.map(p=>`<tr><td><b>${esc(p.full_name)}</b>${p.phone?`<div class="xs muted">${esc(p.phone)}</div>`:''}</td><td class="sm">${esc(p.email)}</td>
       <td><select data-pset="role" data-id="${p.id}" aria-label="Role for ${esc(p.full_name)}" ${p.id===myId()?'disabled':''}><option value="guardian" ${p.role==='guardian'?'selected':''}>Parent / guardian</option><option value="coach" ${p.role==='coach'?'selected':''}>Coach</option><option value="admin" ${p.role==='admin'?'selected':''}>Administrator</option></select>
         ${p.role==='admin'?`<label class="xs" style="display:flex;gap:6px;align-items:center;margin-top:4px"><input type="checkbox" data-pset="is_coach" data-id="${p.id}" ${p.is_coach?'checked':''}> also coaches</label>`:''}</td>
-      <td>${p.id===myId()?'<span class="xs muted">You</span>':`<button class="btn sm ${p.active?'':'primary'}" data-act="toggleperson" data-id="${p.id}">${p.active?'Turn off access':'Turn on access'}</button>`}</td></tr>`).join('')}
+      <td>${p.id===myId()?'<span class="xs muted">You</span>':`<div style="display:flex;gap:6px;flex-wrap:wrap"><button class="btn sm" data-act="setpw" data-id="${p.id}">Set password</button><button class="btn sm ${p.active?'':'primary'}" data-act="toggleperson" data-id="${p.id}">${p.active?'Turn off access':'Turn on access'}</button></div>`}</td></tr>`).join('')}
   </tbody></table></div></div>`;
 }
 
-/* ============ SIGN IN (email + 6-digit code) ============ */
-let SI={step:'email',email:'',err:'',info:'',busy:false,resendAt:0};
-let siTimer=null;
+/* ============ SIGN IN (email + password) ============ */
+let SI={err:'',busy:false,email:''};
 function siSide(){return `<section class="si-side" aria-label="The Forge">
      <img alt="The Forge" src="logo.png">
      <div><div class="up xs" style="color:var(--accent2);margin-bottom:14px">Individual Athlete Profile</div>
@@ -568,42 +567,38 @@ function siSide(){return `<section class="si-side" aria-label="The Forge">
      <div class="addr">The Forge · Rochelle Wrestling Club<br>1135 Lincoln Hwy, Rochelle, IL 61068</div></section>`}
 function siShell(inner){return `<div class="si">${siSide()}<section class="si-main"><div class="si-box">${inner}</div></section></div>`}
 function signInView(){
-  const msgs=`${SI.err?`<div class="err" role="alert">${esc(SI.err)}</div>`:''}${SI.info?`<div class="banner good" style="font-size:13px">${esc(SI.info)}</div>`:''}`;
-  let form;
-  if(SI.step==='email'){
-    form=`<form class="si-box" data-form="siemail" novalidate>
+  return `<div class="si">${siSide()}<section class="si-main"><form class="si-box" data-form="signin" novalidate>
      <h1>Sign in</h1>
-     <div class="muted sm" style="margin-bottom:22px">For Forge families, coaches and staff. No password needed — we’ll email you a 6-digit code.</div>
-     <div class="fld"><label class="f" for="si-email">Email address</label><input type="email" id="si-email" autocomplete="email" value="${esc(SI.email)}" placeholder="you@example.com"></div>
-     ${msgs}
-     <button type="submit" class="btn primary" ${SI.busy?'disabled':''}>${SI.busy?'Sending code…':'Send sign-in code'}</button>
-     <div class="si-foot">Use the email the club has on file for you. New families: register through <a href="https://rochellewrestlingclub.com" target="_blank" rel="noopener">rochellewrestlingclub.com</a> and the club will set up your access.</div></form>`;
-  } else {
-    const left=Math.max(0,Math.ceil((SI.resendAt-Date.now())/1000));
-    form=`<form class="si-box" data-form="sicode" novalidate>
-     <h1>Enter your code</h1>
-     <div class="muted sm">If <b style="color:var(--text)">${esc(SI.email)}</b> is registered with the club, a 6-digit code is on its way. It expires in 10 minutes. Check your spam folder if you don’t see it.</div>
-     <div class="otp" role="group" aria-label="6-digit sign-in code">${[0,1,2,3,4,5].map(i=>`<input inputmode="numeric" autocomplete="${i?'off':'one-time-code'}" maxlength="6" aria-label="Digit ${i+1}" data-otp="${i}">`).join('')}</div>
-     ${msgs}
-     <button type="submit" class="btn primary" ${SI.busy?'disabled':''}>${SI.busy?'Checking…':'Sign in'}</button>
-     <div class="row" style="margin:14px 0 0"><button type="button" class="linkbtn" data-act="siback">Use a different email</button>
-       <button type="button" class="linkbtn" data-act="siresend" id="si-resend" ${left?'disabled style="opacity:.5;text-decoration:none;cursor:default"':''}>${left?`Resend in ${left}s`:'Resend code'}</button></div>
-     <div class="si-foot">Codes work once. Never share yours — Forge staff will never ask for it.</div></form>`;
-  }
-  return `<div class="si">${siSide()}<section class="si-main">${form}</section></div>`;
+     <div class="muted sm" style="margin-bottom:22px">For Forge families, coaches and staff.</div>
+     <div class="fld"><label class="f" for="si-email">Email address</label><input type="email" id="si-email" autocomplete="username" value="${esc(SI.email)}" placeholder="you@example.com"></div>
+     <div class="fld"><label class="f" for="si-pw">Password</label><input type="password" id="si-pw" autocomplete="current-password"></div>
+     ${SI.err?`<div class="err" role="alert">${esc(SI.err)}</div>`:''}
+     <button type="submit" class="btn primary" ${SI.busy?'disabled':''}>${SI.busy?'Signing in…':'Sign in'}</button>
+     <div class="si-foot">Forgot your password? Ask a Forge administrator to reset it.<br>New families: register through <a href="https://rochellewrestlingclub.com" target="_blank" rel="noopener">rochellewrestlingclub.com</a> and the club will set up your sign-in.</div>
+   </form></section></div>`;
 }
-function siFocusFirst(){const f=document.querySelector('[data-otp="0"]');if(f&&!f.disabled)f.focus()}
-function siTick(){clearInterval(siTimer);siTimer=setInterval(()=>{const b=$('#si-resend');if(!b){clearInterval(siTimer);return}
-  const left=Math.max(0,Math.ceil((SI.resendAt-Date.now())/1000));
-  if(left){b.textContent=`Resend in ${left}s`}else{b.textContent='Resend code';b.disabled=false;b.removeAttribute('style');clearInterval(siTimer)}},1000)}
-async function siSend(){
-  SI.busy=true;SI.err='';render();
-  const {error}=await sb.auth.signInWithOtp({email:SI.email,options:{shouldCreateUser:true}});
-  SI.busy=false;
-  if(error){const m=error.message||'';
-    SI.err=/rate|seconds|too many/i.test(m)?'Too many code requests. Wait a minute, then try again.':(/invalid/i.test(m)?'Enter a valid email address.':'We couldn’t send a code right now. Try again in a minute.');
-    render();return}
-  SI.step='code';SI.resendAt=Date.now()+60000;render();siFocusFirst();siTick();
+function newTempPassword(){const A='ABCDEFGHJKLMNPQRSTUVWXYZabcdefghjkmnpqrstuvwxyz',D='23456789';const r=new Uint32Array(8);crypto.getRandomValues(r);
+  const pick=(set,i)=>set[r[i]%set.length];return 'Forge-'+[0,1,2,3].map(i=>pick(D,i)).join('')+'-'+[4,5,6,7].map(i=>pick(A,i)).join('')}
+async function setLogin(email,password){
+  const {data,error}=await sb.functions.invoke('manage-login',{body:{email,password}});
+  if(error){let m=error.message;try{const b=await error.context?.json?.();if(b?.error)m=b.error}catch(e){}throw new Error(m||'Couldn’t set the password.')}
+  if(data?.error)throw new Error(data.error);
+  return data;
+}
+function passwordModal(name,email,pw){
+  modal(`<div class="mh"><h3>Sign-in for ${esc(name)}</h3><button class="btn sm" data-act="closemodal">Done</button></div>
+   <p class="muted sm">Share this privately (in person, text or phone). They’ll be asked to choose their own password after signing in. This password won’t be shown again.</p>
+   <div class="card" style="margin-top:12px"><div class="cline"><span><span class="xs muted">Email</span><br><span class="sel">${esc(email)}</span></span>${copyBtn(email)}</div>
+   <div class="hr"></div><div class="cline"><span><span class="xs muted">Temporary password</span><br><b class="sel" style="font-size:18px;letter-spacing:.04em">${esc(pw)}</b></span>${copyBtn(pw)}</div></div>
+   <p class="xs muted" style="margin-top:12px">Sign in at ${esc(location.origin)}</p>`);
+}
+function changePwModal(forced){
+  modal(`<div class="mh"><h3>${forced?'Choose your own password':'Change password'}</h3>${forced?'':'<button class="btn sm" data-act="closemodal">Cancel</button>'}</div>
+   ${forced?'<p class="muted sm">You signed in with a temporary password from the club. Pick a new one only you know.</p>':''}
+   <div class="fld" style="margin-top:12px"><label class="f" for="pw1">New password (at least 8 characters)</label><input type="password" id="pw1" autocomplete="new-password"></div>
+   <div class="fld" style="margin-top:10px"><label class="f" for="pw2">Type it again</label><input type="password" id="pw2" autocomplete="new-password"></div>
+   <button class="btn primary" style="margin-top:14px" data-act="dochangepw">Save password</button>`);
+  setTimeout(()=>$('#pw1')?.focus(),30);
 }
 function setupView(){return siShell(`<h1>Almost ready</h1><p class="muted">This portal isn’t connected to its database yet. Open <b>config.js</b> and paste in the Supabase project URL and anon key, as described in the setup guide.</p>`)}
 function loadingView(){return `<div class="empty" style="margin-top:60px">Loading your portal…</div>`}
@@ -787,6 +782,7 @@ function render(){
   renderRoles();
   const r=U().role;
   $('#main').innerHTML= r==='coach'?(U().open?workspace():coachDash()) : r==='parent'?parentView() : adminView();
+  if(SESSION.user?.user_metadata?.temp_password&&!$('#pw1'))changePwModal(true);
 }
 
 /* ============ SAVING DRAFTS ============ */
@@ -844,7 +840,7 @@ const ACT={
   preview:()=>{const d=curDraft();const a=ath(U().open);
     modal(`<div class="mh"><div><div class="up xs" style="color:var(--amber)">Preview · not visible to family</div><h3 style="margin-top:4px">${esc(a.name)} — ${monthLabel(d.period)}</h3></div><button class="btn sm" data-act="closemodal">Close</button></div>
      ${reportBody(d,a,prevPub(a.id,d.period))}<div class="card chart" style="margin-top:16px"><h3>Technical profile</h3>${radar(d.ratings,prevPub(a.id,d.period)?.ratings)}</div>`)},
-  closemodal:(t,e)=>{if(e.target===t||t.tagName==='BUTTON')$('#modal').innerHTML=''},
+  closemodal:(t,e)=>{if(SESSION?.user?.user_metadata?.temp_password&&$('#pw1'))return;if(e.target===t||t.tagName==='BUTTON')$('#modal').innerHTML=''},
   approve:async()=>{const d=curDraft();const m=validate(d);if(m.length){toast('Still needed: '+m.join(', '));return}
     await flushDraft();if(dirty)return;
     run(()=>q(sb.from('assessments').update({status:'ready'}).eq('id',d.id).select('id')),'Approved. Publish when you’re ready.')},
@@ -890,9 +886,13 @@ const ACT={
   toggleslot:t=>{const s=S.slots.find(x=>x.id===t.dataset.id);run(()=>q(sb.from('availability').update({open:!s.on}).eq('id',s.id).select('id')))},
   delslot:t=>run(()=>q(sb.from('availability').delete().eq('id',t.dataset.id).select('id')),'Time removed'),
   sendnow:async()=>{toast('Sending…');try{await sb.functions.invoke('send-notifications')}catch(e){}await run(async()=>{})},
-  addperson:()=>{const name=val('np-name'),email=val('np-email').toLowerCase(),role=val('np-role');
+  addperson:async t=>{const name=val('np-name'),email=val('np-email').toLowerCase(),role=val('np-role');
     if(!name){toast('Enter a name');return}if(!/^\S+@\S+\.\S+$/.test(email)){toast('Enter a valid email');return}
-    run(async()=>{await q(sb.from('people').insert({full_name:name,email,role,phone:val('np-phone')||null,is_coach:role==='admin'&&!!$('#np-coach')?.checked}).select('id'));log(null,'Added '+role+' — '+name)},name+' can now sign in')},
+    const pw=newTempPassword();
+    const ok=await run(async()=>{await q(sb.from('people').insert({full_name:name,email,role,phone:val('np-phone')||null,is_coach:role==='admin'&&!!$('#np-coach')?.checked}).select('id'));log(null,'Added '+role+' — '+name)});
+    if(!ok)return;
+    try{await setLogin(email,pw);passwordModal(name,email,pw)}
+    catch(e){toast(name+' was added, but the password couldn’t be set: '+e.message+'. Use “Set password” in the list.')}},
   toggleperson:t=>{const p=person(t.dataset.id);run(async()=>{await q(sb.from('people').update({active:!p.active}).eq('id',p.id).select('id'));log(null,(p.active?'Turned off':'Turned on')+' access — '+p.full_name)},p.active?'Access turned off':'Access turned on')},
   addathlete:()=>{const name=val('na-name');if(!name){toast('Enter the athlete’s name');return}
     const g1=val('na-g1'),g2=val('na-g2');
@@ -904,8 +904,19 @@ const ACT={
   unlink:t=>{const a=ath(t.dataset.a),gd=person(t.dataset.g);
     modal(`<div class="mh"><h3>Unlink ${esc(gd.full_name)}?</h3></div><p class="muted">${esc(gd.full_name)} will no longer see ${esc(a.name)}’s reports. You can link them again later.</p><div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" data-act="dounlink" data-a="${a.id}" data-g="${gd.id}">Unlink</button><button class="btn" data-act="closemodal">Cancel</button></div>`)},
   dounlink:t=>{$('#modal').innerHTML='';run(()=>q(sb.from('athlete_guardians').delete().eq('athlete_id',t.dataset.a).eq('guardian_id',t.dataset.g).select('athlete_id')),'Unlinked')},
-  siback:()=>{SI.step='email';SI.err='';SI.info='';render()},
-  siresend:t=>{if(t.disabled)return;SI.info='A new code is on its way. Your previous code no longer works.';siSend()},
+  setpw:t=>{const p=person(t.dataset.id);const pw=newTempPassword();
+    modal(`<div class="mh"><h3>Set a new password for ${esc(p.full_name)}?</h3></div><p class="muted">Their current password will stop working. You’ll see the new temporary password once, to share with them.</p><div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" data-act="dosetpw" data-id="${p.id}" data-pw="${pw}">Set new password</button><button class="btn" data-act="closemodal">Cancel</button></div>`)},
+  dosetpw:async t=>{const p=person(t.dataset.id);t.disabled=true;t.textContent='Saving…';
+    try{await setLogin(p.email,t.dataset.pw);log(null,'Set a new sign-in password — '+p.full_name);passwordModal(p.full_name,p.email,t.dataset.pw)}
+    catch(e){$('#modal').innerHTML='';toast(e.message)}},
+  changepw:()=>changePwModal(false),
+  dochangepw:async t=>{const a=$('#pw1').value,b=$('#pw2').value;
+    if(a.length<8){toast('Use at least 8 characters');return}if(a!==b){toast('The two passwords don’t match');return}
+    t.disabled=true;t.textContent='Saving…';
+    const {data,error}=await sb.auth.updateUser({password:a,data:{temp_password:false}});
+    if(error){t.disabled=false;t.textContent='Save password';toast(/same|different/i.test(error.message||'')?'Choose a password different from your current one.':errMsg(error));return}
+    if(data?.user&&SESSION)SESSION={...SESSION,user:data.user};
+    $('#modal').innerHTML='';toast('Password saved');render()},
   signout:async()=>{await flushDraft().catch(()=>{});await sb.auth.signOut();},
 };
 document.addEventListener('click',e=>{const t=e.target.closest('[data-act]');if(!t||t.disabled)return;if(t.tagName==='A')return;ACT[t.dataset.act]?.(t,e)});
@@ -921,27 +932,18 @@ document.addEventListener('change',e=>{const el=e.target;
   if(el.dataset.hist){U()[el.dataset.hist]=el.value;render()}
   if(el.dataset.aset){const v=el.value||null;run(()=>q(sb.from('athletes').update({[el.dataset.aset]:v}).eq('id',el.dataset.id).select('id')),'Saved')}
   if(el.dataset.pset){const v=el.type==='checkbox'?el.checked:el.value;run(()=>q(sb.from('people').update({[el.dataset.pset]:v}).eq('id',el.dataset.id).select('id')),'Saved')}});
-document.addEventListener('submit',async e=>{const f=e.target.dataset.form;if(!f||!f.startsWith('si'))return;e.preventDefault();
-  if(f==='siemail'){const em=val('si-email').toLowerCase();SI.email=em;SI.info='';
-    if(!/^\S+@\S+\.\S+$/.test(em)){SI.err='Enter a valid email address.';render();return}
-    siSend();return}
-  const entered=[...document.querySelectorAll('[data-otp]')].map(i=>i.value).join('');
-  if(entered.length<6){SI.err='Enter all 6 digits.';SI.info='';render();siFocusFirst();siTick();return}
+document.addEventListener('submit',async e=>{if(e.target.dataset.form!=='signin')return;e.preventDefault();
+  const em=val('si-email').toLowerCase(),pw=$('#si-pw')?.value||'';SI.email=em;
+  if(!/^\S+@\S+\.\S+$/.test(em)){SI.err='Enter a valid email address.';render();return}
+  if(!pw){SI.err='Enter your password.';render();$('#si-pw')?.focus();return}
   SI.busy=true;SI.err='';render();
-  const {error}=await sb.auth.verifyOtp({email:SI.email,token:entered,type:'email'});
-  if(error){SI.busy=false;SI.err='That code isn’t right or has expired. Check the latest email, or request a new code.';render();siFocusFirst();siTick();return}
-  SI={step:'email',email:'',err:'',info:'',busy:false,resendAt:0};
+  const {error}=await sb.auth.signInWithPassword({email:em,password:pw});
+  if(error){SI.busy=false;const m=error.message||'';
+    SI.err=/rate|too many/i.test(m)?'Too many tries. Wait a minute, then try again.':/Failed to fetch|network/i.test(m)?'Can’t reach the server. Check your connection and try again.':'Email or password is incorrect.';
+    render();$('#si-pw')?.focus();return}
+  SI={err:'',busy:false,email:''};
 });
-document.addEventListener('input',e=>{const el=e.target;if(el.dataset.otp===undefined)return;
-  const v=el.value.replace(/\D/g,'');const boxes=[...document.querySelectorAll('[data-otp]')];const i0=+el.dataset.otp;
-  if(v.length>1){v.split('').slice(0,6-i0).forEach((d,k)=>{boxes[i0+k].value=d});boxes[Math.min(i0+v.length,5)].focus()}
-  else{el.value=v;if(v&&boxes[i0+1])boxes[i0+1].focus()}
-  if(boxes.every(b=>b.value))el.closest('form').requestSubmit()});
-document.addEventListener('paste',e=>{const el=e.target;if(el.dataset?.otp===undefined)return;e.preventDefault();
-  const v=(e.clipboardData.getData('text')||'').replace(/\D/g,'').slice(0,6);const boxes=[...document.querySelectorAll('[data-otp]')];
-  v.split('').forEach((d,i)=>boxes[i].value=d);if(v.length===6)el.closest('form').requestSubmit();else boxes[v.length]?.focus()});
-document.addEventListener('keydown',e=>{const el=e.target;if(el.dataset?.otp!==undefined&&e.key==='Backspace'&&!el.value){const p=document.querySelector(`[data-otp="${+el.dataset.otp-1}"]`);if(p){p.focus();p.value=''}}});
-document.addEventListener('keydown',e=>{if(e.key==='Escape')$('#modal').innerHTML=''});
+document.addEventListener('keydown',e=>{if(e.key==='Escape'&&!(SESSION?.user?.user_metadata?.temp_password&&$('#pw1')))$('#modal').innerHTML=''});
 
 /* ============ START ============ */
 async function afterAuth(){

@@ -1,8 +1,9 @@
 # The Forge — Athlete Development Portal (live version)
 
 A real, multi-user version of the portal demo: families, coaches and admins sign in
-with their email and a 6-digit code, coaches write monthly assessments, families get
-an email when something new is published, and every report is kept.
+with their email and a password, coaches write monthly assessments, and every report is kept.
+Accounts are created by a Forge administrator (no self sign-up), so only people the club
+adds can get in.
 
 It is a standalone site for now. Later, the RWC website can simply link to it
 (e.g. a "Athlete Portal" button pointing at `athletes.rochellewrestlingclub.com`).
@@ -14,7 +15,7 @@ It is a standalone site for now. Later, the RWC website can simply link to it
 | `public/` | The website itself (upload this folder to Vercel). |
 | `public/config.js` | The only file you edit: your Supabase address and public key. |
 | `supabase/schema.sql` | Creates the database and the rules for who can see what. |
-| `supabase/sign-in-code-email.html` | The email families get with their 6-digit code. |
+| `supabase/functions/manage-login/index.ts` | Lets an admin create sign-ins and reset passwords from the portal. |
 | `supabase/functions/send-notifications/index.ts` | Sends "new report / request / meeting" emails. |
 
 ## How privacy is enforced
@@ -27,7 +28,8 @@ tinkers with the site:
 - Coaches see only athletes assigned to them. Admins see everything.
 - A published report is locked. Only goal progress and "read" marks can change.
 - Meeting times close as soon as one family requests them.
-- An email that isn't on the club's list can sign in but sees nothing.
+- Nobody can create their own account. An admin adds each person and gives them a
+  temporary password, which they must change at first sign-in.
 
 ---
 
@@ -49,29 +51,25 @@ You'll create three free accounts: **Supabase** (database + sign-in),
    ```
    (Use lowercase for the email.) This makes you the first administrator, and lets you coach too.
 
-### 2. Set up the sign-in code email
+### 2. Lock down sign-up and create your own sign-in
 
-1. In Supabase: **Authentication → Sign In / Providers → Email**. Make sure Email is on.
-   Set **Email OTP Expiration** to `600` (10 minutes) and **Email OTP Length** to `6`. Save.
-2. **Authentication → Emails → Templates**:
-   - Open **Magic Link**. Subject: `Your Forge sign-in code: {{ .Token }}`.
-     Replace the body with the contents of `supabase/sign-in-code-email.html`. Save.
-   - Do the same for **Confirm signup** (first-time sign-ins use that one).
-3. **Authentication → URL Configuration**: set **Site URL** to your Vercel address once you have it (step 5).
+1. **Authentication → Sign In / Providers**: turn **off** "Allow new users to sign up".
+   (Admins create everyone's sign-in from the portal instead.)
+2. **Authentication → Users → Add user → Create new user**: your email and a password,
+   with **Auto Confirm User** checked. This is the only account you create here; everyone
+   else is added from the portal.
+3. **Authentication → URL Configuration**: set **Site URL** to your Vercel address.
 
-### 3. Send real email (Resend)
+### 3. Send family notification emails (Resend) — optional, can wait
 
-Supabase's built-in email is only for testing and sends just a few emails an hour,
-so families need a real sender.
+Sign-in doesn't need email. This step only turns on the "new report / request / meeting"
+emails to families.
 
 1. Sign up at **resend.com**. Free plan: 100 emails a day, 3,000 a month.
 2. **Domains → Add domain** → `rochellewrestlingclub.com`. Resend shows a few DNS records;
    add them wherever the club's domain is managed (or ask whoever runs the website).
    Until the domain is verified, Resend only lets you send test emails to yourself.
 3. **API Keys → Create** → copy the key (starts with `re_`).
-4. Back in Supabase: **Authentication → Emails → SMTP Settings** → enable custom SMTP:
-   - Host `smtp.resend.com`, Port `465`, Username `resend`, Password = your Resend key
-   - Sender email `portal@rochellewrestlingclub.com`, Sender name `The Forge`
 
 ### 4. Turn on family notification emails
 
@@ -96,10 +94,12 @@ so families need a real sender.
 
 ### 6. First sign-in
 
-Open your Vercel address, enter your email, type the code from your inbox.
+Open your Vercel address and sign in with the email and password from step 2.
 You'll land on **Administrator**. Then:
 
-1. **People → Add a person** for each coach and parent (name + email + role).
+1. **People → Add person & create sign-in** for each coach and parent. The portal shows a
+   temporary password once; share it privately. They choose their own at first sign-in.
+   Forgotten password? **People → Set password** gives them a new temporary one.
 2. **Athletes → Add an athlete**: pick the coach, link one or two guardians, set
    subscription to **Test activation** (or **Active** once they've paid on the RWC site).
 3. Coaches sign in, add their meeting times, and start assessments.
@@ -112,7 +112,7 @@ Use real sign-ins with made-up athletes:
 
 - Add yourself as admin + coach (step 1.4 already did this).
 - Add a "parent" using a second email of yours. Gmail tip: `you+parent@gmail.com`
-  arrives in your normal inbox but counts as a different email.
+  counts as a different email.
 - Add a test athlete or two (status **Test activation**), write and publish an assessment,
   then sign in as the "parent" on your phone to show the report, the email it triggered,
   a reflection and a meeting request.
