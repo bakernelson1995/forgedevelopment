@@ -91,7 +91,7 @@ function trend(c,p){if(typeof c!=='number'||typeof p!=='number')return {t:p===un
 const isAdmin=()=>S.me?.role==='admin';
 const isCoachMe=()=>S.me&&(S.me.role==='coach'||(S.me.role==='admin'&&S.me.is_coach));
 const myId=()=>S.me?.id;
-const errMsg=e=>{const m=(e&&e.message)||'';if(/locked|no longer available|assigned coach/i.test(m)||/Approve the report/i.test(m)||/Only an administrator/i.test(m)||/start as drafts/i.test(m))return m;
+const errMsg=e=>{const m=(e&&e.message)||'';if(/locked|no longer available|assigned coach/i.test(m)||/Approve the report/i.test(m)||/Only an administrator/i.test(m)||/isn.t published|not found/i.test(m)||/start as drafts/i.test(m))return m;
   if(/duplicate key/i.test(m))return 'That already exists.';if(/row-level security/i.test(m))return 'You don’t have permission to do that.';
   if(/Failed to fetch|NetworkError/i.test(m))return 'Can’t reach the server. Check your connection and try again.';return m||'Something went wrong. Try again.'};
 
@@ -336,7 +336,7 @@ function workspace(){
   if(!d){
     body=`<div class="card" style="text-align:center;padding:40px 20px"><h3>${monthLabel(ep)} assessment not started</h3><p class="muted">Previous ratings and goals will be shown alongside the form for reference.</p><button class="btn primary" data-act="start" data-id="${a.id}">Start assessment</button></div>`;
   } else if(d.status==='published'){
-    body=`<div class="banner good">Published ${fd(d.ts.published)} · ${d.ts.ack?'Family read it '+fd(d.ts.ack):'Not yet read by the family'}. Published reports are locked; an administrator can help with corrections.
+    body=`<div class="banner good">Published ${fd(d.ts.published)} · ${d.ts.ack?'Family read it '+fd(d.ts.ack):'Not yet read by the family'}. Published reports are locked; an administrator can help with corrections.${S.me&&S.me.role==='admin'?` <button class="btn sm" data-act="reopen" data-id="${d.id}" style="margin-left:8px">Reopen for corrections</button>`:''}
       <button class="btn sm" data-act="dlreport" data-id="${d.id}" style="margin-left:auto">Printable report</button></div>
       ${reportBody(d,a,prevPub(a.id,d.period))}`;
   } else body=editor(a,d,prev);
@@ -1055,6 +1055,9 @@ const ACT={
     if(st!==a.coachStage){upd.coach_stage=st;upd.coach_stage_at=st?new Date().toISOString():null}
     $('#modal').innerHTML='';
     run(async()=>{await q(sb.from('athletes').update(upd).eq('id',a.id).select('id'));log(null,'Edited athlete profile — '+name)},name+'’s profile saved')},
+  reopen:t=>{const d=S.assessments.find(x=>x.id===t.dataset.id),a=ath(d.athleteId);
+    modal(`<div class="mh"><h3>Reopen ${esc(a.name)}’s ${monthLabel(d.period)} report?</h3></div><p class="muted">It goes back to a draft so it can be corrected. ${esc(a.family)} won’t see this report until it’s approved and published again; everything already written stays in place.</p><div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" data-act="doreopen" data-id="${d.id}">Reopen report</button><button class="btn" data-act="closemodal">Cancel</button></div>`)},
+  doreopen:t=>{$('#modal').innerHTML='';run(()=>q(sb.rpc('reopen_report',{p_assessment:t.dataset.id})),'Report reopened — edit it, then approve and publish again')},
   link:t=>{const aid=t.dataset.id;const gid=val('lg-'+aid);if(!gid){toast('Choose a guardian');return}
     run(()=>q(sb.from('athlete_guardians').insert({athlete_id:aid,guardian_id:gid,relationship:val('lr-'+aid)||'Parent'}).select('athlete_id')),'Guardian linked')},
   unlink:t=>{const a=ath(t.dataset.a),gd=person(t.dataset.g);
