@@ -4,4 +4,6 @@
 window.FORGE_CONFIG = {
   supabaseUrl: "https://cfzejogfvobvdtyyctcr.supabase.co",
   supabaseAnonKey: "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNmemVqb2dmdm9idmR0eXljdGNyIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTMyMDM1OTYsImV4cCI6MjEwODc3OTU5Nn0.xAl4hq8ZQH3cyEmjWMmNYhoffN6Dfu8jlU1U2gQTOgk",
+  // Turn on once Resend is connected (see README step 3).
+  emailNotifications: false,
 };

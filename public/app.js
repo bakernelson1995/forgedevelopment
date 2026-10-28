@@ -6,6 +6,7 @@
 
 /* ============ CONFIG ============ */
 const CFG = window.FORGE_CONFIG || {};
+const EMAILS = CFG.emailNotifications === true;   // family/coach notification emails (needs Resend)
 const CONFIGURED = !!(window.supabase && CFG.supabaseUrl && !/YOUR-/.test(CFG.supabaseUrl) && CFG.supabaseAnonKey && !/YOUR-/.test(CFG.supabaseAnonKey));
 const sb = CONFIGURED ? window.supabase.createClient(CFG.supabaseUrl, CFG.supabaseAnonKey) : null;
 const pad = n => String(n).padStart(2, '0');
@@ -35,8 +36,8 @@ function g(title,category,behavior,measure,review,coachRec,commit,status){return
 
 /* ============ STATE ============ */
 let S = blankState();
-function blankState(){return {ui:{role:null,filter:'all',open:null,tab:'overview',range:6,skill:'tsi',cmpA:null,cmpB:null,slot:null,pa:null,adm:'overview'},
-  me:null,people:[],athletes:[],coaches:[],assessments:[],reflections:[],meetings:[],slots:[],asks:[],notifs:[],audit:[],links:[]}}
+function blankState(){return {ui:{role:null,filter:'all',open:null,tab:'overview',range:6,skill:'tsi',cmpA:null,cmpB:null,slot:null,pa:null,adm:'overview',choosing:false},
+  me:null,people:[],athletes:[],coaches:[],requests:[],assessments:[],reflections:[],meetings:[],slots:[],asks:[],notifs:[],audit:[],links:[]}}
 let SESSION=null, LOADING=false, LOAD_ERR='';
 let GUARDIANS={};
 const U=()=>S.ui;
@@ -85,7 +86,7 @@ async function loadAll(){
   const me=people.find(p=>p.email===email&&p.active)||null;
   S.me=me;if(!me)return;
   const staff=me.role!=='guardian';
-  const [athletes,links,assess,notes,refl,asks,mtgs,avail,notifs,audit]=await Promise.all([
+  const [athletes,links,assess,notes,refl,asks,mtgs,avail,notifs,audit,creqs]=await Promise.all([
     q(sb.from('athletes').select('*').order('full_name')),
     q(sb.from('athlete_guardians').select('*')),
     q(sb.from('assessments').select('*')),
@@ -95,10 +96,11 @@ async function loadAll(){
     q(sb.from('meetings').select('*').order('starts_at')),
     q(sb.from('availability').select('*').order('starts_at')),
     q(sb.from('notifications').select('*').order('created_at',{ascending:false}).limit(100)),
-    me.role==='admin'?q(sb.from('audit_log').select('*').order('at',{ascending:false}).limit(60)):Promise.resolve([])]);
+    me.role==='admin'?q(sb.from('audit_log').select('*').order('at',{ascending:false}).limit(60)):Promise.resolve([]),
+    q(sb.from('coach_requests').select('*').order('created_at'))]);
   const P=Object.fromEntries(people.map(p=>[p.id,p]));
   S.people=people;S.links=links;
-  S.coaches=people.filter(p=>p.role==='coach'||(p.role==='admin'&&p.is_coach)).map(p=>({id:p.id,name:p.full_name,styles:'',active:p.active}));
+  S.coaches=people.filter(p=>p.role==='coach'||(p.role==='admin'&&p.is_coach)).map(p=>({id:p.id,name:p.full_name,styles:p.specialties||'',bio:p.bio||'',accepting:p.accepting!==false,active:p.active}));
   const noteMap=Object.fromEntries(notes.map(n=>[n.assessment_id,n.notes||{}]));
   S.assessments=assess.map(r=>({id:r.id,athleteId:r.athlete_id,period:String(r.period).slice(0,7),status:r.status,ratings:r.ratings||{},styleRatings:r.style_ratings||{},notes:noteMap[r.id]||{},
     stand:r.stand||'',well:r.well||'',tough:r.tough||'',adjCoach:r.adj_coach||'',adjAthlete:r.adj_athlete||'',take:r.take||'',goals:r.goals||[],contrib:r.contrib,coach:r.coach_id,
@@ -117,6 +119,7 @@ async function loadAll(){
     reply:(x.reply_text||x.reply_link)?{by:P[x.reply_by]?.full_name||'Family',ts:x.replied_at,text:x.reply_text||'',link:x.reply_link||''}:null}));
   S.notifs=notifs.map(n=>({id:n.id,ts:n.created_at,athleteId:n.athlete_id,kind:n.kind,to:P[n.person_id]?.full_name||n.address,channel:n.channel,addr:n.address,subject:n.subject,text:n.body,status:n.status,error:n.error}));
   S.audit=audit.map(e=>({ts:e.at,actor:P[e.actor_id]?.full_name||'System',action:e.action}));
+  S.requests=creqs.map(r=>({id:r.id,athleteId:r.athlete_id,coach:r.coach_id,byName:r.requester_name||'A Forge family',note:r.note||'',status:r.status,ts:r.created_at,decided:r.decided_at}));
 }
 function rolesFor(me){if(!me)return [];if(me.role==='guardian')return [['parent','Family']];if(me.role==='coach')return [['coach','Coach']];
   return me.is_coach?[['admin','Administrator'],['coach','Coach']]:[['admin','Administrator']]}
@@ -124,7 +127,7 @@ async function run(fn,okMsg){
   try{await fn();await loadAll();render();if(okMsg)toast(okMsg);return true}
   catch(e){console.error(e);toast(errMsg(e));return false}}
 function log(_actor,action){if(sb&&S.me)sb.from('audit_log').insert({actor_id:S.me.id,action}).then(()=>{},()=>{})}
-function sendQueued(){if(sb)sb.functions.invoke('send-notifications').then(()=>{},()=>{})}
+function sendQueued(){if(sb&&EMAILS)sb.functions.invoke('send-notifications').then(()=>{},()=>{})}
 
 const needsAction=t=>t.some(x=>x.k!=='published');
 function tasksFor(a){
@@ -239,6 +242,11 @@ function coachDash(){
         <div><button class="btn sm ${needsAction(t)?'primary':''}" data-act="open" data-id="${a.id}">Open</button></div></div>`}).join(''):`<div class="empty">No athletes match this filter.</div>`}
     </section>
     <aside class="aside">
+      ${(()=>{const apps=S.requests.filter(r=>r.coach===me&&r.status==='pending');return `<div class="card" ${apps.length?'style="border-color:var(--accent2)"':''}><h4>New athlete applications${apps.length?` · ${apps.length}`:''}</h4>
+        ${apps.length?apps.map(r=>{const x=ath(r.athleteId);return `<div class="app"><b>${esc(x?.name||'Athlete')}</b><div class="sm muted">${esc(x?.style||'')}${x?.aff?' · '+esc(x.aff):''}</div>
+          <div class="xs muted" style="margin-top:4px">From ${esc(r.byName)} · ${fd(r.ts,{month:'short',day:'numeric'})}${x?.coach?' · currently with '+esc(coach(x.coach).name):''}</div>
+          ${r.note?`<p class="sm" style="margin:6px 0 0">“${esc(r.note)}”</p>`:''}
+          <div style="display:flex;gap:6px;margin-top:8px"><button class="btn sm primary" data-act="acceptreq" data-id="${r.id}">Accept</button><button class="btn sm" data-act="declinereq" data-id="${r.id}">Decline</button></div></div>`}).join('<div class="hr"></div>'):'<div class="muted sm">No new applications.</div>'}</div>`})()}
       <div class="card"><h4>Parent questions</h4>
         ${pendingRefl.length||famReplies.length?pendingRefl.map(r=>`<div><b>${esc(ath(r.athleteId)?.name)}</b><div class="sm muted">Reflection · ${fd(r.ts,{month:'short',day:'numeric'})}</div><p class="sm" style="margin:6px 0 8px">“${esc(r.answers.discuss||r.answers.differ||r.answers.agree||r.answers.commit)}”</p><button class="btn sm" data-act="open" data-id="${r.athleteId}">Review</button></div>`).join('<div class="hr"></div>'):'<div class="muted sm">Nothing waiting.</div>'}${famReplies.map(q=>`<div class="hr"></div><div><b>${esc(ath(q.athleteId)?.name)}</b><div class="sm muted">Family replied · ${esc(q.type)}</div><p class="sm" style="margin:6px 0 8px">“${esc(q.reply.text||q.reply.link)}”</p><button class="btn sm" data-act="open" data-id="${q.athleteId}">Review</button></div>`).join('')}
       </div>
@@ -251,6 +259,11 @@ function coachDash(){
         <button class="btn sm" data-act="addslot" style="margin-bottom:12px">+ Add time</button>
         ${mySlots.length?`<div class="slots">${mySlots.map(sl=>{const taken=S.meetings.some(m=>sameTime(m.slot,sl.at)&&m.coach===me&&['requested','confirmed'].includes(m.status));return `<div class="slotwrap"><button class="slot ${sl.on?'':'off'}" ${taken?'disabled':''} data-act="toggleslot" data-id="${sl.id}">${fd(sl.at,{weekday:'short',month:'short',day:'numeric'})}<br><span class="muted">${new Date(sl.at).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})}${taken?' · booked':''}</span></button>${taken?'':`<button class="slotx" data-act="delslot" data-id="${sl.id}" aria-label="Remove this time">×</button>`}</div>`}).join('')}</div>`:'<div class="muted sm">No upcoming times yet.</div>'}
       </div>
+      <div class="card"><h4>My coach profile</h4><div class="xs muted" style="margin-bottom:10px">Families see this when choosing a coach.</div>
+        <label class="f" for="cp-spec">Specialties</label><input type="text" id="cp-spec" value="${esc(S.me.specialties||'')}" placeholder="e.g. Greco-Roman · Freestyle · Par terre">
+        <label class="f" for="cp-bio" style="margin-top:10px">Short bio</label><textarea id="cp-bio" rows="4" placeholder="Your coaching background and approach">${esc(S.me.bio||'')}</textarea>
+        <label style="display:flex;gap:8px;align-items:center;font-size:13.5px;margin-top:10px"><input type="checkbox" id="cp-acc" ${S.me.accepting!==false?'checked':''}> Accepting new athletes</label>
+        <button class="btn sm" style="margin-top:10px" data-act="saveprofile">Save profile</button></div>
     </aside>
   </div>`;
 }
@@ -363,6 +376,32 @@ function reportBody(r,a,prev){
   <div class="take"><div class="up xs" style="color:var(--accent2);margin-bottom:12px">The Coach’s Take</div><div class="q">“</div><blockquote>${esc(r.take)||'—'}</blockquote><div class="sig">— ${esc(coach(r.coach||a.coach).name)} · ${monthLabel(r.period)}</div></div>`;
 }
 
+
+/* ============ COACH SELECTION (families) ============ */
+function coachCard(c,a){
+  const cur=c.id===a.coach;
+  return `<div class="ccard"><div class="cch"><div class="av" style="width:48px;height:48px;font-size:16px">${initials(c.name)}</div>
+    <div style="min-width:0"><b>${esc(c.name)}</b><div class="xs muted">${esc(c.styles)||'Forge coach'}</div></div></div>
+    <p class="sm" style="margin:10px 0 12px;flex:1">${esc(c.bio)||'<span class="muted">Profile coming soon.</span>'}</p>
+    ${cur?'<span class="pill published">Current coach</span>':c.accepting?`<button class="btn primary sm" data-act="reqcoach" data-c="${c.id}">Request ${esc(firstName(c.name))}</button>`:'<span class="pill">Not taking new athletes right now</span>'}</div>`;
+}
+function coachPicker(a){
+  const pend=S.requests.find(r=>r.athleteId===a.id&&r.status==='pending');
+  if(pend)return `<div class="card" style="max-width:620px;margin:24px auto;text-align:center;padding:28px">
+    <div class="up xs muted">Coach request sent</div><h2 style="margin:8px 0 10px;font-size:24px">Waiting on ${esc(coach(pend.coach).name)}</h2>
+    <p class="muted">${esc(coach(pend.coach).name)} has your request to coach ${esc(a.name)}. You’ll see the answer here${a.coach?'':' and can start using the portal once it’s accepted'}.</p>
+    <div style="display:flex;gap:8px;justify-content:center;flex-wrap:wrap;margin-top:12px">${a.coach?'<button class="btn sm" data-act="cancelchoose">Back to the report</button>':''}<button class="btn sm ghost" data-act="withdrawreq" data-id="${pend.id}">Withdraw request</button></div></div>`;
+  const declined=S.requests.filter(r=>r.athleteId===a.id&&r.status==='declined').slice(-1)[0];
+  const list=S.coaches.filter(c=>c.active);
+  return `${declined&&!a.coach?`<div class="banner">${esc(coach(declined.coach).name)} isn’t able to take on ${esc(firstName(a.name))} right now. Please choose another coach.</div>`:''}
+  <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin:6px 0 16px">
+    <div><div class="up xs muted">${a.coach?'Change coach':'Welcome to The Forge'}</div><h1 style="font-size:28px;margin-top:4px">Choose ${esc(firstName(a.name))}’s coach</h1>
+    <p class="muted" style="margin:6px 0 0;max-width:62ch">Pick the coach you’d like ${esc(firstName(a.name))} to work with. They’ll get your request and accept it in the portal. ${a.coach?'Past reports stay with '+esc(firstName(a.name))+' if the coach changes.':''}</p></div>
+    ${a.coach?'<button class="btn sm" data-act="cancelchoose">Cancel</button>':''}</div>
+  <div class="card" style="margin-bottom:16px"><label class="f" for="cr-note">Anything the coach should know? (optional)</label><textarea id="cr-note" rows="2" placeholder="e.g. Wrestles folkstyle for his high school; wants to focus on Greco this spring"></textarea></div>
+  ${list.length?`<div class="grid g3">${list.map(c=>coachCard(c,a)).join('')}</div>`:'<div class="empty">No coaches are listed yet. The club will assign a coach for you.</div>'}`;
+}
+
 /* ============ PARENT ============ */
 const famKids=()=>S.athletes.filter(x=>x.guardianIds.includes(myId()));
 const curKid=()=>{const k=famKids();return k.find(x=>x.id===U().pa)||k[0]};
@@ -372,6 +411,7 @@ function kidSwitcher(){const k=famKids();if(k.length<2)return '';
 function parentView(){
   const a=curKid();
   if(!a)return `<div class="empty" style="margin-top:30px">Your account isn’t linked to an athlete yet. The club will link your athlete after registration; check back soon.</div>`;
+  if(!a.coach||U().choosing)return kidSwitcher()+coachPicker(a);
   const r=latestPub(a.id);const prev=r?prevPub(a.id,r.period):null;
   const tab=U().tab;
   const tabs=[['overview','Overview'],['performance','Performance'],['blueprint','Development Blueprint'],['history','Progress History'],['meetings','Meetings']];
@@ -388,7 +428,7 @@ function parentView(){
   ${parentAsks(a)}
   ${isNew?`<div class="banner good noprint"><b>New report from ${esc(coach(r.coach||a.coach).name)}</b> — ${monthLabel(r.period)}, published ${fd(r.ts.published)}.<button class="btn sm" data-act="ackreport" style="margin-left:auto">Mark as read</button></div>`:''}
   <div class="hero"><div class="kick"><img alt="The Forge" src="logo.png">Athlete Development Report</div><h1>${esc(a.name)}</h1>
-    <div class="meta"><div><span>Primary style</span><b>${esc(a.style)}</b></div><div><span>Assigned coach</span><b>${esc(coach(a.coach).name)}</b></div><div><span>Reporting month</span><b>${r?monthLabel(r.period):'—'}</b></div><div><span>Developmental stage</span><b>${esc(a.stage)}</b></div><div><span>Status</span><b>${r?'Published '+fd(r.ts.published,{month:'short',day:'numeric'}):'Pending'}</b></div></div>
+    <div class="meta"><div><span>Primary style</span><b>${esc(a.style)}</b></div><div><span>Assigned coach</span><b>${esc(coach(a.coach).name)}</b><button class="linkbtn noprint" style="display:block;margin-top:2px;font-size:12px" data-act="choosecoach">${S.requests.some(x=>x.athleteId===a.id&&x.status==='pending')?'Coach request pending':'Request a different coach'}</button></div><div><span>Reporting month</span><b>${r?monthLabel(r.period):'—'}</b></div><div><span>Developmental stage</span><b>${esc(a.stage)}</b></div><div><span>Status</span><b>${r?'Published '+fd(r.ts.published,{month:'short',day:'numeric'}):'Pending'}</b></div></div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:0" class="noprint">
     <div class="tabs" role="tablist" style="flex:1">${tabs.map(([k,l])=>`<button class="tab ${tab===k?'on':''}" role="tab" aria-selected="${tab===k}" data-act="tab" data-v="${k}">${l}</button>`).join('')}</div>
@@ -497,14 +537,16 @@ function adminOverview(){
       ['Overdue reports',overdue.length,overdue.length?'amber':''],['Upcoming meetings',upcoming],['Paid (active)',S.athletes.filter(a=>a.status==='active').length],['Payment issues',S.athletes.filter(a=>a.status==='grace').length,S.athletes.some(a=>a.status==='grace')?'amber':'']]
       .map(([l,n,c])=>`<div class="stat ${c||''}" style="cursor:default"><div class="l">${l}</div><div class="n">${n}</div></div>`).join('')}
   </div>
-  ${unassigned.length?`<div class="banner">${unassigned.length} athlete${unassigned.length===1?' has':'s have'} no coach yet: ${unassigned.map(a=>esc(a.name)).join(', ')}. Assign one under Athletes.</div>`:''}
+  ${(()=>{const pend=S.requests.filter(r=>r.status==='pending');return pend.length?`<div class="card" style="margin-bottom:16px"><h3>Coach requests waiting</h3>${pend.map(r=>`<div class="prow" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(ath(r.athleteId)?.name||'Athlete')}</b> <span class="muted sm">→ ${esc(coach(r.coach).name)} · from ${esc(r.byName)} · ${fd(r.ts,{month:'short',day:'numeric'})}</span></div><div style="display:flex;gap:6px"><button class="btn sm" data-act="acceptreq" data-id="${r.id}">Approve</button><button class="btn sm ghost" data-act="declinereq" data-id="${r.id}">Decline</button></div></div>`).join('')}</div>`:''})()}
+  ${unassigned.filter(a=>!S.requests.some(r=>r.athleteId===a.id&&r.status==='pending')).length?`<div class="banner">${unassigned.length} athlete${unassigned.length===1?' has':'s have'} no coach yet. Families choose one when they sign in, or you can assign one under Athletes.</div>`:''}
   ${overdue.length?`<div class="card" style="margin-bottom:16px;border-color:rgba(208,170,98,.4)"><h3>Missed reporting commitments</h3>${overdue.map(a=>`<div class="prow"><b>${esc(a.name)}</b> <span class="muted sm">· ${esc(coach(a.coach).name)} · ${monthLabel(a.overdueFrom)} report was due ${fd(periodEnd(a.overdueFrom).toISOString())}</span></div>`).join('')}</div>`:''}
   <div class="card" style="margin-bottom:16px"><h3>Coach workload</h3>${rows.length?`<div class="tscroll"><table class="t"><thead><tr><th>Coach</th><th>Assigned</th><th>Published this month</th><th>Overdue</th><th>Parent questions</th><th>Pending meetings</th></tr></thead>
    <tbody>${rows.map(r=>`<tr><td><b>${esc(r.c.name)}</b></td><td>${r.assigned}</td><td>${r.done}</td><td class="${r.over?'down-c':''}">${r.over}</td><td>${r.q}</td><td>${r.m}</td></tr>`).join('')}</tbody></table></div>`:'<div class="muted sm">No coaches yet. Add them under People.</div>'}</div>
   <div class="grid g2" style="align-items:start">
-   <div class="card"><h3>Family emails</h3><div class="xs muted" style="margin-bottom:8px">Sent when a report is published, a coach sends a request, or a meeting is confirmed.${queued?` ${queued} waiting to send.`:''}</div>
+   ${EMAILS?'':`<div class="card"><h3>Notification emails</h3><div class="sm muted">Turned off. Families and coaches see new reports, requests and meetings when they sign in. To turn emails on later, connect Resend and set <b>emailNotifications: true</b> in config.js.</div></div>`}
+   ${!EMAILS?'':`<div class="card"><h3>Family emails</h3><div class="xs muted" style="margin-bottom:8px">Sent when a report is published, a coach sends a request, or a meeting is confirmed.${queued?` ${queued} waiting to send.`:''}</div>
      ${queued?`<button class="btn sm" data-act="sendnow" style="margin-bottom:10px">Send waiting emails now</button>`:''}
-     ${S.notifs.length?S.notifs.slice(0,10).map(nPreview).join(''):'<div class="muted sm">None yet.</div>'}</div>
+     ${S.notifs.length?S.notifs.slice(0,10).map(nPreview).join(''):'<div class="muted sm">None yet.</div>'}</div>`}
    <div class="card"><h3>Audit log</h3>${S.audit.length?S.audit.slice(0,15).map(e=>`<div class="prow sm"><div>${esc(e.action)}</div><div class="xs muted">${esc(e.actor)} · ${ft(e.ts)}</div></div>`).join(''):'<div class="muted sm">Nothing logged yet.</div>'}</div>
   </div>
   <div class="card" style="margin-top:16px"><h3>Assessment rubric</h3><div class="sm muted" style="margin-bottom:12px">The skills coaches rate each month.</div>
@@ -512,10 +554,10 @@ function adminOverview(){
 }
 function adminAthletes(){
   const guardians=S.people.filter(p=>p.role==='guardian'&&p.active).sort((a,b)=>a.full_name.localeCompare(b.full_name));
-  const coachOpts=sel=>`<option value="">— No coach yet —</option>`+S.coaches.filter(c=>c.active).map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
+  const coachOpts=sel=>`<option value="">— Family chooses —</option>`+S.coaches.filter(c=>c.active).map(c=>`<option value="${c.id}" ${sel===c.id?'selected':''}>${esc(c.name)}</option>`).join('');
   const gOpts=`<option value="">— Choose guardian —</option>`+guardians.map(p=>`<option value="${p.id}">${esc(p.full_name)} (${esc(p.email)})</option>`).join('');
   return `<div class="card" style="margin-bottom:16px"><h3>Add an athlete</h3>
-    <div class="sm muted" style="margin-bottom:12px">Add the parent or guardian under People first, then link them here. They’ll be able to sign in with their email.</div>
+    <div class="sm muted" style="margin-bottom:12px">Add the parent or guardian under People first, then link them here. Leave the coach as “Family chooses” and the family picks one when they sign in.</div>
     <div class="fgrid">
       <div><label class="f" for="na-name">Athlete name</label><input type="text" id="na-name" placeholder="First Last"></div>
       <div><label class="f" for="na-style">Primary style</label><select id="na-style">${STYLES.map(s=>`<option>${s}</option>`).join('')}</select></div>
@@ -724,7 +766,7 @@ function contactCard(a){
    <div class="xs muted" style="margin-top:8px">Visible only to the assigned coach and administrators. Contact guardians, not athletes directly.</div>
    <div class="hr"></div>
    <h4>Ask the family</h4>
-   <div class="xs muted" style="margin-bottom:8px">Requests are emailed to every guardian on the account and kept here.</div>
+   <div class="xs muted" style="margin-bottom:8px">${EMAILS?'Requests are emailed to every guardian on the account and kept here.':'Requests appear for every guardian on the account and are kept here.'}</div>
    <label class="f" for="ask-type">Type</label><select id="ask-type" style="margin-bottom:8px">${ASK_TYPES.map(t=>`<option>${t}</option>`).join('')}</select>
    <label class="f" for="ask-text">Request</label><textarea id="ask-text" rows="3" placeholder="e.g. Could you send video of Saturday's matches? I want to look at par terre defense."></textarea>
    <button class="btn sm primary" style="margin-top:8px" data-act="sendask" data-id="${a.id}" ${gs.length?'':'disabled'}>Send to family</button>
@@ -749,7 +791,13 @@ function parentAsks(a){
 function planText(a){const gs=GUARDIANS[a.id]||[];if(!gs.length)return 'No guardian is linked yet, so no one will be emailed.';
   return gs.map(gd=>`<b>${esc(gd.name)}</b> ${gd.notify?'by email':'(emails turned off)'}`).join(' · ')}
 function notifCard(a){
-  const me=S.me;const gs=GUARDIANS[a.id]||[];const others=gs.filter(x=>x.id!==me.id);
+  const me=S.me;
+  if(!EMAILS)return `<div class="card noprint" style="margin-top:16px"><h3>Your contact details</h3>
+   <div class="sm muted" style="margin-bottom:6px">${esc(coach(a.coach).name)} uses these if they need to reach you.</div>
+   <div class="fgrid" style="margin-top:10px"><div><label class="f" for="me-phone">Phone</label><input type="text" id="me-phone" value="${esc(me.phone||'')}"></div>
+   <div><label class="f" for="me-pref">Best way to reach me</label><select id="me-pref">${['Email','Text','Phone call'].map(x=>`<option ${me.contact_pref===x?'selected':''}>${x}</option>`).join('')}</select></div>
+   <div class="full"><label class="f" for="me-best">Best times</label><input type="text" id="me-best" value="${esc(me.best_time||'')}" placeholder="e.g. Weekdays after 5 PM"></div></div>
+   <button class="btn sm" style="margin-top:10px" data-act="savecontact">Save contact details</button></div>`;const gs=GUARDIANS[a.id]||[];const others=gs.filter(x=>x.id!==me.id);
   const recent=S.notifs.filter(n=>n.athleteId===a.id).slice(0,4);
   return `<div class="card noprint" style="margin-top:16px"><h3>How we reach you</h3>
    <div class="sm muted" style="margin-bottom:12px">We email you when ${esc(coach(a.coach).name)} publishes a report, sends you a request, or confirms a meeting. Emails say what’s new and link here; the report itself stays behind your sign-in.</div>
@@ -845,19 +893,30 @@ const ACT={
     await flushDraft();if(dirty)return;
     run(()=>q(sb.from('assessments').update({status:'ready'}).eq('id',d.id).select('id')),'Approved. Publish when you’re ready.')},
   publish:()=>{const d=curDraft();const a=ath(d.athleteId);
-    modal(`<div class="mh"><h3>Publish ${monthLabel(d.period)} report?</h3></div><p>The ${esc(a.family)} will see this report right away. After publishing it’s locked; an administrator can help with corrections.</p><div class="note" style="margin-top:12px">Emailing: ${planText(a)}</div>
+    modal(`<div class="mh"><h3>Publish ${monthLabel(d.period)} report?</h3></div><p>The ${esc(a.family)} will see this report right away. After publishing it’s locked; an administrator can help with corrections.</p>${EMAILS?`<div class="note" style="margin-top:12px">Emailing: ${planText(a)}</div>`:''}
      <div style="display:flex;gap:8px;margin-top:16px"><button class="btn primary" data-act="dopublish">Publish to family</button><button class="btn" data-act="closemodal">Cancel</button></div>`)},
   dopublish:async t=>{const d=curDraft();const a=ath(d.athleteId);t.disabled=true;t.textContent='Publishing…';
     const ok=await run(()=>q(sb.from('assessments').update({status:'published'}).eq('id',d.id).select('id')),'Published — the '+a.family+' can see it now');
     $('#modal').innerHTML='';if(ok)sendQueued()},
   tab:t=>{U().tab=t.dataset.v;render()},
+  choosecoach:()=>{U().choosing=true;render();scrollTo(0,0)},
+  cancelchoose:()=>{U().choosing=false;render();scrollTo(0,0)},
+  reqcoach:async t=>{const a=curKid();const c=coach(t.dataset.c);t.disabled=true;
+    const ok=await run(()=>q(sb.from('coach_requests').insert({athlete_id:a.id,coach_id:c.id,requested_by:myId(),note:val('cr-note')||null}).select('id')),'Request sent to '+c.name);
+    if(ok){sendQueued()}else t.disabled=false},
+  withdrawreq:t=>run(()=>q(sb.from('coach_requests').update({status:'withdrawn'}).eq('id',t.dataset.id).select('id')),'Request withdrawn'),
+  acceptreq:async t=>{const r=S.requests.find(x=>x.id===t.dataset.id);
+    const ok=await run(()=>q(sb.from('coach_requests').update({status:'accepted'}).eq('id',r.id).select('id')),(ath(r.athleteId)?.name||'Athlete')+' is now on '+(r.coach===myId()?'your':coach(r.coach).name+'’s')+' list');
+    if(ok)sendQueued()},
+  declinereq:async t=>{const ok=await run(()=>q(sb.from('coach_requests').update({status:'declined'}).eq('id',t.dataset.id).select('id')),'Declined — the family will be asked to choose another coach');if(ok)sendQueued()},
+  saveprofile:()=>run(()=>q(sb.from('people').update({specialties:val('cp-spec')||null,bio:val('cp-bio')||null,accepting:!!$('#cp-acc')?.checked}).eq('id',myId()).select('id')),'Profile saved'),
   admtab:t=>{U().adm=t.dataset.v;render()},
   dlreport:t=>downloadReport(t.dataset.id),
   copy:t=>{const v=t.dataset.v;const done=()=>{t.textContent='Copied';setTimeout(()=>t.textContent='Copy',1500)};
     const sel=()=>{const el=t.parentElement.querySelector('.sel');if(el){const r=document.createRange();r.selectNodeContents(el);const x=getSelection();x.removeAllRanges();x.addRange(r)}toast('Selected — press Ctrl+C or ⌘C to copy')};
     try{navigator.clipboard.writeText(v).then(done,sel)}catch(e){sel()}},
   sendask:async t=>{const a=ath(t.dataset.id);const text=val('ask-text');if(!text){toast('Write your request first');return}
-    const ok=await run(()=>q(sb.from('asks').insert({athlete_id:a.id,coach_id:myId(),type:val('ask-type')||'Question',body:text}).select('id')),'Sent — the '+a.family+' will get an email');
+    const ok=await run(()=>q(sb.from('asks').insert({athlete_id:a.id,coach_id:myId(),type:val('ask-type')||'Question',body:text}).select('id')),EMAILS?'Sent — the '+a.family+' will get an email':'Sent — the family will see it when they sign in');
     if(ok)sendQueued()},
   askseen:t=>run(()=>q(sb.from('asks').update({seen_at:new Date().toISOString()}).eq('id',t.dataset.id).select('id'))),
   replyask:t=>{const id=t.dataset.id;const text=val('rp-'+id);let link=val('rl-'+id);
@@ -866,7 +925,7 @@ const ACT={
     run(()=>q(sb.from('asks').update({reply_text:text||null,reply_link:link||null,reply_by:myId(),replied_at:new Date().toISOString(),seen_at:null}).eq('id',id).select('id')),'Reply sent to your coach')},
   setnotify:t=>run(()=>q(sb.from('people').update({notify_email:t.dataset.v==='on'}).eq('id',myId()).select('id')),t.dataset.v==='on'?'You’ll get emails':'Emails turned off'),
   savecontact:()=>run(()=>q(sb.from('people').update({phone:val('me-phone')||null,contact_pref:val('me-pref')||'Email',best_time:val('me-best')||null}).eq('id',myId()).select('id')),'Contact details saved'),
-  pickkid:t=>{U().pa=t.dataset.v;U().slot=null;U().cmpA=null;U().cmpB=null;render()},
+  pickkid:t=>{U().choosing=false;U().pa=t.dataset.v;U().slot=null;U().cmpA=null;U().cmpB=null;render()},
   ackreport:()=>{const r=latestPub(curKid().id);run(()=>q(sb.rpc('acknowledge_report',{p_id:r.id})))},
   sendrefl:async()=>{const a=curKid();const r=latestPub(a.id);const ans={};let any=false;['agree','differ','commit','discuss'].forEach(k=>{ans[k]=val('rf-'+k);if(ans[k])any=true});
     if(!any){toast('Add at least one answer first');return}
@@ -877,7 +936,7 @@ const ACT={
   pickslot:t=>{U().slot=t.dataset.v;render()},
   reqmtg:()=>{if(!U().slot){toast('Choose a time first');return}const a=curKid();const slot=U().slot;
     run(async()=>{await q(sb.from('meetings').insert({athlete_id:a.id,coach_id:a.coach,starts_at:slot,purpose:val('mp'),note:val('mn')||null,requested_by:myId()}).select('id'));U().slot=null},'Request sent to '+coach(a.coach).name)},
-  confirmmtg:async t=>{const ok=await run(()=>q(sb.from('meetings').update({status:'confirmed'}).eq('id',t.dataset.id).select('id')),'Confirmed — the family will get an email');if(ok)sendQueued()},
+  confirmmtg:async t=>{const ok=await run(()=>q(sb.from('meetings').update({status:'confirmed'}).eq('id',t.dataset.id).select('id')),EMAILS?'Confirmed — the family will get an email':'Confirmed');if(ok)sendQueued()},
   declinemtg:t=>run(()=>q(sb.from('meetings').update({status:'declined'}).eq('id',t.dataset.id).select('id')),'Declined'),
   donemtg:t=>{const id=t.dataset.id;run(()=>q(sb.from('meetings').update({status:'completed',summary:val('sum-'+id)||null}).eq('id',id).select('id')),'Meeting summary saved')},
   addslot:()=>{const d=val('av-date'),tm=val('av-time');if(!d||!tm){toast('Pick a date and a time');return}

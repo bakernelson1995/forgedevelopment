@@ -263,3 +263,9 @@ table.t td{padding:11px 10px;border-bottom:1px solid var(--border)}
 .slotx:hover{color:var(--text);border-color:var(--accent)}
 table.t select{width:auto;max-width:220px;padding:6px 8px;font-size:13px}
 .si-box form.si-box{max-width:none}
+
+.ccard{display:flex;flex-direction:column;background:var(--bg2);border:1px solid var(--border);border-radius:var(--r);padding:18px}
+.ccard .cch{display:flex;gap:12px;align-items:center}
+.ccard b{font-family:Archivo,Inter,sans-serif;font-size:16px}
+.ccard .btn,.ccard .pill{align-self:flex-start}
+.app{padding:2px 0}
