@@ -67,6 +67,18 @@ const fmtR=v=>typeof v==='number'?v+'/4':(v==='NO'?'Not observed':'—');
 function editPeriod(a){return a.overdueFrom||PERIOD}
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),3200)}
 function daysTo(d){return Math.ceil((d-TODAY)/864e5)}
+function dayDiff(a,b){const x=new Date(a.getFullYear(),a.getMonth(),a.getDate()),y=new Date(b.getFullYear(),b.getMonth(),b.getDate());return Math.round((x-y)/864e5)}
+const dueLabel=p=>periodEnd(p).toLocaleDateString('en-US',{weekday:'short',month:'short',day:'numeric'});
+// Where a coach stands on an athlete's monthly report: overdue | due | done | notyet
+function deadline(a){
+  if(a.overdue&&a.overdue.length){const p=a.overdue[0];return {state:'overdue',period:p,count:a.overdue.length,late:dayDiff(TODAY,periodEnd(p))}}
+  const r=find(a.id,PERIOD);const left=dayDiff(periodEnd(PERIOD),TODAY);
+  if(r&&r.status==='published')return {state:'done',period:PERIOD,left};
+  if(!a.owesCurrent)return {state:'notyet',period:a.firstOwed,left:dayDiff(periodEnd(a.firstOwed),TODAY)}
+  return {state:'due',period:PERIOD,left,stage:!r?'Not started':r.status==='draft'?'Draft in progress':r.status==='review'?'Awaiting your review':'Approved — publish it'}
+}
+const leftText=n=>n<=0?'Due today':n===1?'1 day left':n+' days left';
+const lateText=n=>n<=1?'1 day late':n+' days late';
 function trend(c,p){if(typeof c!=='number'||typeof p!=='number')return {t:p===undefined?'New':'—',c:'muted',a:''};if(c>p)return {t:'Improving',c:'up-c',a:'↑'};if(c<p)return {t:'Needs renewed attention',c:'down-c',a:'↓'};return {t:'Consistent',c:'muted',a:'→'}}
 const isAdmin=()=>S.me?.role==='admin';
 const isCoachMe=()=>S.me&&(S.me.role==='coach'||(S.me.role==='admin'&&S.me.is_coach));
@@ -109,9 +121,16 @@ async function loadAll(){
   S.athletes=athletes.map(a=>{const ls=links.filter(l=>l.athlete_id===a.id);const gs=ls.map(l=>P[l.guardian_id]).filter(Boolean);
     GUARDIANS[a.id]=ls.map(l=>{const p=P[l.guardian_id];return p&&{id:p.id,name:p.full_name,rel:l.relationship,email:p.email,phone:p.phone||'',pref:p.contact_pref||'Email',best:p.best_time||'',notify:p.notify_email}}).filter(Boolean);
     return {id:a.id,name:a.full_name,style:a.primary_style,coach:a.coach_id,aff:a.affiliation,stage:a.stage,status:a.status,created:a.created_at,family:familyName(a,gs),guardianIds:gs.map(x=>x.id)}});
-  const prevP=periodOf(new Date(TODAY.getFullYear(),TODAY.getMonth()-1,1));
-  S.athletes.forEach(a=>{const pr=find(a.id,prevP);
-    if(a.status!=='inactive'&&String(a.created).slice(0,7)<prevP&&!(pr&&pr.status==='published'))a.overdueFrom=prevP});
+  S.requests=creqs.map(r=>({id:r.id,athleteId:r.athlete_id,coach:r.coach_id,byName:r.requester_name||'A Forge family',note:r.note||'',status:r.status,ts:r.created_at,decided:r.decided_at}));
+  S.athletes.forEach(a=>{
+    // Reports are owed from the month the current coach took the athlete on (after the 15th → starting next month).
+    const acc=S.requests.filter(r=>r.athleteId===a.id&&r.coach===a.coach&&r.status==='accepted').map(r=>r.decided).sort().slice(-1)[0];
+    const start=new Date(acc&&acc>a.created?acc:a.created);
+    const first=new Date(start.getFullYear(),start.getMonth()+(start.getDate()>15?1:0),1);
+    a.firstOwed=periodOf(first);a.owesCurrent=a.firstOwed<=PERIOD;a.overdue=[];
+    if(a.status!=='inactive'&&a.coach)for(let d=new Date(first);periodOf(d)<PERIOD;d=new Date(d.getFullYear(),d.getMonth()+1,1)){
+      const p=periodOf(d),r=find(a.id,p);if(!(r&&r.status==='published'))a.overdue.push(p)}
+    a.overdueFrom=a.overdue[0]||null});
   S.reflections=refl.map(r=>({id:r.id,athleteId:r.athlete_id,assessmentId:r.assessment_id,ts:r.created_at,answers:r.answers||{},author:P[r.author_id]?.full_name||'Family',ack:r.ack_at?{ts:r.ack_at,reply:r.ack_reply||''}:null}));
   S.meetings=mtgs.map(m=>({id:m.id,athleteId:m.athlete_id,coach:m.coach_id,slot:m.starts_at,purpose:m.purpose,note:m.note||'',status:m.status,summary:m.summary||'',ts:m.created_at}));
   S.slots=avail.map(s=>({id:s.id,at:s.starts_at,on:s.open,coach:s.coach_id}));
@@ -119,7 +138,6 @@ async function loadAll(){
     reply:(x.reply_text||x.reply_link)?{by:P[x.reply_by]?.full_name||'Family',ts:x.replied_at,text:x.reply_text||'',link:x.reply_link||''}:null}));
   S.notifs=notifs.map(n=>({id:n.id,ts:n.created_at,athleteId:n.athlete_id,kind:n.kind,to:P[n.person_id]?.full_name||n.address,channel:n.channel,addr:n.address,subject:n.subject,text:n.body,status:n.status,error:n.error}));
   S.audit=audit.map(e=>({ts:e.at,actor:P[e.actor_id]?.full_name||'System',action:e.action}));
-  S.requests=creqs.map(r=>({id:r.id,athleteId:r.athlete_id,coach:r.coach_id,byName:r.requester_name||'A Forge family',note:r.note||'',status:r.status,ts:r.created_at,decided:r.decided_at}));
 }
 function rolesFor(me){if(!me)return [];if(me.role==='guardian')return [['parent','Family']];if(me.role==='coach')return [['coach','Coach']];
   return me.is_coach?[['admin','Administrator'],['coach','Coach']]:[['admin','Administrator']]}
@@ -129,16 +147,20 @@ async function run(fn,okMsg){
 function log(_actor,action){if(sb&&S.me)sb.from('audit_log').insert({actor_id:S.me.id,action}).then(()=>{},()=>{})}
 function sendQueued(){if(sb&&EMAILS)sb.functions.invoke('send-notifications').then(()=>{},()=>{})}
 
-const needsAction=t=>t.some(x=>x.k!=='published');
+const needsAction=t=>t.some(x=>x.k!=='published'&&x.k!=='notyet');
 function tasksFor(a){
   const t=[];const ep=editPeriod(a);
-  if(ep!==PERIOD){t.push({k:'overdue',l:'Overdue · '+monthShort(ep)+' report'})}
+  if(ep!==PERIOD){t.push({k:'overdue',l:a.overdue.length>1?'Overdue · '+a.overdue.length+' reports':'Overdue · '+monthShort(ep)+' report'})}
+  if(ep===PERIOD&&!a.owesCurrent&&!find(a.id,PERIOD)){t.push({k:'notyet',l:'First report due '+dueLabel(a.firstOwed)});return t.concat(extraTasks(a))}
   const cur=find(a.id,ep);
   if(!cur) t.push({k:'notstarted',l:'Not Started'});
   else if(cur.status==='draft') t.push({k:'draft',l:'Draft in Progress'});
   else if(cur.status==='review') t.push({k:'review',l:'Awaiting Coach Review'});
   else if(cur.status==='ready') t.push({k:'ready',l:'Ready to Publish'});
   else t.push({k:'published',l:'Published'});
+  return t.concat(extraTasks(a));
+}
+function extraTasks(a){const t=[];
   if(S.reflections.some(r=>r.athleteId===a.id&&!r.ack)||asksFor(a.id).some(q=>q.reply&&!q.seen)) t.push({k:'parent',l:'Parent Response Pending'});
   if(S.meetings.some(m=>m.athleteId===a.id&&m.status==='requested')) t.push({k:'meeting',l:'Meeting Requested'});
   return t;
@@ -221,11 +243,29 @@ function coachDash(){
   const shown=list.filter(filt[f]||filt.all);
   const chips=[['all','All'],['action','Needs action'],['overdue','Overdue'],['draft','Drafts'],['review','Awaiting review'],['published','Published'],['parent','Parent requests'],['meetings','Meetings']];
   const mySlots=S.slots.filter(s=>s.coach===me&&new Date(s.at)>TODAY);
+  const dl=list.map(x=>({a:x.a,d:deadline(x.a)}));
+  const over=dl.filter(x=>x.d.state==='overdue').sort((x,y)=>y.d.late-x.d.late);
+  const dueNow=dl.filter(x=>x.d.state==='due');
+  const doneNow=dl.filter(x=>x.d.state==='done');
+  const left=dayDiff(periodEnd(PERIOD),TODAY);
+  const alert=over.length?`<div class="dl-alert bad" role="alert"><div><b>${over.length} overdue report${over.length===1?'':'s'}</b> — ${over.map(x=>esc(firstName(x.a.name))).join(', ')}. Families are waiting on ${over.length===1?'it':'these'}.</div><button class="btn sm primary" data-act="open" data-id="${over[0].a.id}">Start with ${esc(firstName(over[0].a.name))}</button></div>`
+    :dueNow.length&&left<=7?`<div class="dl-alert warn"><div><b>${dueNow.length} report${dueNow.length===1?'':'s'} due ${left<=0?'today':'in '+left+' day'+(left===1?'':'s')}</b> (${dueLabel(PERIOD)}).</div><button class="btn sm primary" data-act="open" data-id="${dueNow[0].a.id}">Open ${esc(firstName(dueNow[0].a.name))}</button></div>`
+    :dl.length&&!dueNow.length?`<div class="dl-alert ok"><b>You’re all caught up.</b> Every ${monthLabel(PERIOD)} report is published.</div>`:'';
+  const item=(x,meta)=>`<button class="dl-item" data-act="open" data-id="${x.a.id}"><span class="av">${initials(x.a.name)}</span><span class="dl-txt"><b>${esc(x.a.name)}</b><span>${meta}</span></span><span class="dl-go">Open →</span></button>`;
+  const board=list.length?`<section class="dl-board" aria-label="Report deadlines">
+    <div class="dl-col overdue"><div class="dl-h"><span>Overdue</span><b>${over.length}</b></div>
+      ${over.length?over.map(x=>item(x,`${x.d.count>1?x.d.count+' reports, oldest '+monthLabel(x.d.period):monthLabel(x.d.period)+' report'} · <strong>${lateText(x.d.late)}</strong>`)).join(''):'<div class="dl-empty">Nothing overdue.</div>'}</div>
+    <div class="dl-col due"><div class="dl-h"><span>Due ${dueLabel(PERIOD)}</span><b>${dueNow.length}</b></div><div class="dl-sub">${leftText(left)} in ${monthLabel(PERIOD)}</div>
+      ${dueNow.length?dueNow.map(x=>item(x,esc(x.d.stage))).join(''):'<div class="dl-empty">No reports left this month.</div>'}</div>
+    <div class="dl-col done"><div class="dl-h"><span>Published this month</span><b>${doneNow.length}</b></div>
+      ${doneNow.length?doneNow.map(x=>item(x,'Published')).join(''):'<div class="dl-empty">None yet.</div>'}</div>
+  </section>`:'';
   return `
   <div style="display:flex;justify-content:space-between;align-items:flex-end;gap:12px;flex-wrap:wrap;margin-bottom:18px">
     <div><div class="up xs muted">Coach Action Dashboard</div><h1 style="font-size:28px;margin-top:4px">${greet}, ${esc(firstName(S.me.full_name))}</h1>
-    <div class="muted sm" style="margin-top:4px">${monthLabel(PERIOD)} reporting cycle · Reports due ${fd(due.toISOString(),{weekday:'short',month:'short',day:'numeric'})} (${dd} day${dd===1?'':'s'})</div></div>
+    <div class="muted sm" style="margin-top:4px">${monthLabel(PERIOD)} reports are due by ${dueLabel(PERIOD)} · ${leftText(left)}</div></div>
   </div>
+  ${alert}${board}
   <div class="grid g4" style="margin-bottom:20px">${stats.map(([k,l,n,c])=>`<button class="stat ${c||''} ${f===k?'active':''}" data-act="filter" data-v="${k}"><div class="l">${l}</div><div class="n">${n}</div></button>`).join('')}</div>
   <div class="split">
     <section class="card" aria-label="Athlete task queue">
@@ -237,7 +277,7 @@ function coachDash(){
         return `<div class="qrow"><div class="av">${initials(a.name)}</div>
         <div><b>${esc(a.name)}</b><div class="muted sm">${esc(a.style)} · <span class="muted">${esc(outstanding(t))}</span></div></div>
         <div class="pills">${t.map(pill).join('')}</div>
-        <div class="qd sm ${ep!==PERIOD?'down-c':''}">${fd(end.toISOString(),{month:'short',day:'numeric'})}${ep!==PERIOD?' · overdue':''}</div>
+        ${(()=>{const d=deadline(a);return `<div class="qd sm ${d.state==='overdue'?'down-c':''}"><b style="font-weight:600">${dueLabel(d.period)}</b><div class="xs ${d.state==='overdue'?'down-c':'muted'}">${d.state==='overdue'?lateText(d.late):d.state==='done'?'Published':d.state==='notyet'?'First report':leftText(d.left)}</div></div>`})()}
         <div class="ql sm muted">${lp?monthShort(lp.period)+' '+lp.period.slice(0,4):'—'}</div>
         <div><button class="btn sm ${needsAction(t)?'primary':''}" data-act="open" data-id="${a.id}">Open</button></div></div>`}).join(''):`<div class="empty">No athletes match this filter.</div>`}
     </section>
@@ -532,14 +572,27 @@ function adminOverview(){
   const unassigned=live.filter(a=>!a.coach);
   const upcoming=S.meetings.filter(m=>['requested','confirmed'].includes(m.status)&&new Date(m.slot)>TODAY).length;
   const queued=S.notifs.filter(n=>n.status==='queued').length;
-  return `<div class="grid g4" style="margin-bottom:20px">
+  const left=dayDiff(periodEnd(PERIOD),TODAY);
+  const status=S.coaches.filter(c=>c.active).map(c=>{const mine=live.filter(a=>a.coach===c.id).map(a=>({a,d:deadline(a)}));
+    return {c,over:mine.filter(x=>x.d.state==='overdue'),due:mine.filter(x=>x.d.state==='due'),done:mine.filter(x=>x.d.state==='done'),total:mine.length}})
+    .filter(r=>r.total).sort((x,y)=>y.over.length-x.over.length||y.due.length-x.due.length);
+  const late=status.filter(r=>r.over.length);
+  const overdueReports=late.reduce((n,r)=>n+r.over.reduce((m,x)=>m+x.d.count,0),0);
+  const top=late.length?`<div class="dl-alert bad" role="alert"><div><b>${late.length} coach${late.length===1?' has':'es have'} overdue reports:</b> ${late.map(r=>esc(r.c.name)+' ('+r.over.reduce((m,x)=>m+x.d.count,0)+')').join(', ')}.</div></div>`
+    :status.length?`<div class="dl-alert ok"><b>No overdue reports.</b> ${monthLabel(PERIOD)} reports are due ${dueLabel(PERIOD)} (${leftText(left).toLowerCase()}).</div>`:'';
+  const statusCard=status.length?`<div class="card" style="margin-bottom:16px"><h3>Coach reporting status</h3><div class="sm muted" style="margin-bottom:10px">Each athlete’s monthly report is due by the last day of the month. ${monthLabel(PERIOD)}: due ${dueLabel(PERIOD)} · ${leftText(left).toLowerCase()}.</div>
+    <div class="tscroll"><table class="t"><thead><tr><th>Coach</th><th>Overdue</th><th>Still due this month</th><th>Published this month</th></tr></thead><tbody>
+    ${status.map(r=>`<tr class="${r.over.length?'row-bad':''}"><td><b>${esc(r.c.name)}</b><div class="xs muted">${r.total} athlete${r.total===1?'':'s'}</div></td>
+      <td>${r.over.length?r.over.map(x=>`<div class="sm down-c"><b>${esc(x.a.name)}</b> · ${x.d.count>1?x.d.count+' reports (since '+monthShort(x.d.period)+')':monthLabel(x.d.period)} · ${lateText(x.d.late)}</div>`).join(''):'<span class="up-c sm">None</span>'}</td>
+      <td>${r.due.length?r.due.map(x=>`<div class="sm">${esc(x.a.name)} <span class="xs muted">· ${esc(x.d.stage)}</span></div>`).join(''):'<span class="muted sm">—</span>'}</td>
+      <td class="sm">${r.done.length} of ${r.done.length+r.due.length}</td></tr>`).join('')}</tbody></table></div></div>`:'';
+  return `${top}${statusCard}<div class="grid g4" style="margin-bottom:20px">
     ${[['Subscribed athletes',live.length],['Active coaches',S.coaches.filter(c=>c.active).length],['Reports published this month',done+' of '+live.length],['Completion rate',live.length?Math.round(done/live.length*100)+'%':'—'],
-      ['Overdue reports',overdue.length,overdue.length?'amber':''],['Upcoming meetings',upcoming],['Paid (active)',S.athletes.filter(a=>a.status==='active').length],['Payment issues',S.athletes.filter(a=>a.status==='grace').length,S.athletes.some(a=>a.status==='grace')?'amber':'']]
+      ['Overdue reports',overdueReports,overdueReports?'amber':''],['Upcoming meetings',upcoming],['Paid (active)',S.athletes.filter(a=>a.status==='active').length],['Payment issues',S.athletes.filter(a=>a.status==='grace').length,S.athletes.some(a=>a.status==='grace')?'amber':'']]
       .map(([l,n,c])=>`<div class="stat ${c||''}" style="cursor:default"><div class="l">${l}</div><div class="n">${n}</div></div>`).join('')}
   </div>
   ${(()=>{const pend=S.requests.filter(r=>r.status==='pending');return pend.length?`<div class="card" style="margin-bottom:16px"><h3>Coach requests waiting</h3>${pend.map(r=>`<div class="prow" style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:center"><div><b>${esc(ath(r.athleteId)?.name||'Athlete')}</b> <span class="muted sm">→ ${esc(coach(r.coach).name)} · from ${esc(r.byName)} · ${fd(r.ts,{month:'short',day:'numeric'})}</span></div><div style="display:flex;gap:6px"><button class="btn sm" data-act="acceptreq" data-id="${r.id}">Approve</button><button class="btn sm ghost" data-act="declinereq" data-id="${r.id}">Decline</button></div></div>`).join('')}</div>`:''})()}
   ${unassigned.filter(a=>!S.requests.some(r=>r.athleteId===a.id&&r.status==='pending')).length?`<div class="banner">${unassigned.length} athlete${unassigned.length===1?' has':'s have'} no coach yet. Families choose one when they sign in, or you can assign one under Athletes.</div>`:''}
-  ${overdue.length?`<div class="card" style="margin-bottom:16px;border-color:rgba(208,170,98,.4)"><h3>Missed reporting commitments</h3>${overdue.map(a=>`<div class="prow"><b>${esc(a.name)}</b> <span class="muted sm">· ${esc(coach(a.coach).name)} · ${monthLabel(a.overdueFrom)} report was due ${fd(periodEnd(a.overdueFrom).toISOString())}</span></div>`).join('')}</div>`:''}
   <div class="card" style="margin-bottom:16px"><h3>Coach workload</h3>${rows.length?`<div class="tscroll"><table class="t"><thead><tr><th>Coach</th><th>Assigned</th><th>Published this month</th><th>Overdue</th><th>Parent questions</th><th>Pending meetings</th></tr></thead>
    <tbody>${rows.map(r=>`<tr><td><b>${esc(r.c.name)}</b></td><td>${r.assigned}</td><td>${r.done}</td><td class="${r.over?'down-c':''}">${r.over}</td><td>${r.q}</td><td>${r.m}</td></tr>`).join('')}</tbody></table></div>`:'<div class="muted sm">No coaches yet. Add them under People.</div>'}</div>
   <div class="grid g2" style="align-items:start">

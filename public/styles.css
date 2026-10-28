@@ -269,3 +269,30 @@ table.t select{width:auto;max-width:220px;padding:6px 8px;font-size:13px}
 .ccard b{font-family:Archivo,Inter,sans-serif;font-size:16px}
 .ccard .btn,.ccard .pill{align-self:flex-start}
 .app{padding:2px 0}
+
+/* deadlines */
+.dl-alert{display:flex;gap:14px;align-items:center;justify-content:space-between;flex-wrap:wrap;border-radius:12px;padding:14px 18px;margin-bottom:16px;font-size:15px;border:1px solid}
+.dl-alert.bad{background:rgba(214,120,92,.12);border-color:rgba(214,120,92,.55);color:#F3D6CC}
+.dl-alert.bad b{color:#FFE3D9}
+.dl-alert.warn{background:var(--amberbg);border-color:rgba(208,170,98,.5)}
+.dl-alert.ok{background:var(--goodbg);border-color:rgba(134,181,150,.4)}
+.dl-board{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-bottom:20px}
+@media(max-width:860px){.dl-board{grid-template-columns:1fr}}
+.dl-col{border:1px solid var(--border);border-radius:var(--r);padding:14px;background:var(--bg2);min-width:0}
+.dl-col.overdue{border-color:rgba(214,120,92,.55);background:linear-gradient(180deg,rgba(214,120,92,.10),transparent 70%),var(--bg2)}
+.dl-col.due{border-color:rgba(208,170,98,.45)}
+.dl-h{display:flex;justify-content:space-between;align-items:baseline;font-family:Archivo,Inter,sans-serif;font-weight:700;text-transform:uppercase;letter-spacing:.1em;font-size:12.5px}
+.dl-h b{font-size:26px;letter-spacing:0}
+.dl-col.overdue .dl-h{color:#E8A08A}.dl-col.due .dl-h{color:var(--amber)}.dl-col.done .dl-h{color:var(--good)}
+.dl-sub{font-size:12.5px;color:var(--muted);margin-top:2px}
+.dl-item{display:flex;align-items:center;gap:10px;width:100%;text-align:left;margin-top:8px;padding:9px 10px;border-radius:10px;border:1px solid var(--border);background:var(--bg);cursor:pointer;color:var(--text)}
+.dl-item:hover{border-color:var(--accent2)}
+.dl-item .av{width:32px;height:32px;font-size:12px;flex:none}
+.dl-txt{display:flex;flex-direction:column;min-width:0;flex:1}
+.dl-txt b{font-weight:600;font-size:14px}
+.dl-txt span{font-size:12.5px;color:var(--muted)}
+.dl-col.overdue .dl-txt strong{color:#E8A08A;font-weight:600}
+.dl-go{font-size:12px;color:var(--accent2);flex:none}
+.dl-empty{font-size:13px;color:var(--muted);margin-top:10px}
+.pill.notyet{color:var(--muted)}
+tr.row-bad td{background:rgba(214,120,92,.07)}
