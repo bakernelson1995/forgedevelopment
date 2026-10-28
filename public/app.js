@@ -24,9 +24,9 @@ const CORE=[
  {id:'habits',s:'Training Habits',n:'Training & Competition Habits'}];
 const SCALE=['Not Yet Introduced','Developing','Consistent in Controlled Drilling','Effective vs. Live Resistance','Reliable in Competition'];
 const SETS={
- GR:{name:'Greco-Roman',items:[['stance','Stance & positioning'],['pummel','Pummeling'],['inside','Inside control'],['uhook','Underhooks'],['two','Two-on-ones'],['setups','Upper-body attack setups'],['blocks','Bodylocks'],['throws','Throws'],['tdef','Throw defense'],['ptoff','Par terre offense'],['ptdef','Par terre defense'],['tac','Tactical understanding']]},
- FS:{name:'Freestyle',items:[['leg','Leg attacks'],['setup','Attack setups'],['finish','Finishing ability'],['legdef','Leg-attack defense'],['expo','Exposure awareness'],['ptoff','Par terre offense'],['ptdef','Par terre defense'],['trans','Transitional wrestling'],['tac','Tactical understanding']]},
- FK:{name:'Folkstyle',items:[['neut','Neutral offense'],['tdd','Takedown defense'],['top','Top control'],['ride','Riding ability'],['bottom','Bottom positioning'],['esc','Escapes & reversals'],['matret','Mat returns'],['sit','Situational awareness'],['mm','Match management']]}};
+ GR:{name:'Greco-Roman',items:[['stance','Stance & positioning','Stance'],['pummel','Pummeling','Pummeling'],['inside','Inside control','Inside control'],['uhook','Underhooks','Underhooks'],['two','Two-on-ones','Two-on-ones'],['setups','Upper-body attack setups','Setups'],['blocks','Bodylocks','Bodylocks'],['throws','Throws','Throws'],['tdef','Throw defense','Throw defense'],['ptoff','Par terre offense','PT offense'],['ptdef','Par terre defense','PT defense'],['tac','Tactical understanding','Tactics']]},
+ FS:{name:'Freestyle',items:[['leg','Leg attacks','Leg attacks'],['setup','Attack setups','Setups'],['finish','Finishing ability','Finishing'],['legdef','Leg-attack defense','Leg defense'],['expo','Exposure awareness','Exposure'],['ptoff','Par terre offense','PT offense'],['ptdef','Par terre defense','PT defense'],['trans','Transitional wrestling','Transitions'],['tac','Tactical understanding','Tactics']]},
+ FK:{name:'Folkstyle',items:[['neut','Neutral offense','Neutral'],['tdd','Takedown defense','TD defense'],['top','Top control','Top control'],['ride','Riding ability','Riding'],['bottom','Bottom positioning','Bottom'],['esc','Escapes & reversals','Escapes'],['matret','Mat returns','Mat returns'],['sit','Situational awareness','Situational'],['mm','Match management','Match mgmt']]}};
 const STYLES=['Greco-Roman','Freestyle','Folkstyle','Freestyle & Greco-Roman','All Three Styles'];
 const STYLESETS={'Greco-Roman':['GR'],'Freestyle':['FS'],'Folkstyle':['FK'],'Freestyle & Greco-Roman':['GR','FS'],'All Three Styles':['GR','FS','FK']};
 const GOAL_ST=['Not Started','In Progress','Demonstrated','Needs Revision','Completed'];
@@ -71,7 +71,7 @@ const prevPub=(id,period)=>pubs(id).filter(a=>a.period<period).slice(-1)[0];
 const find=(id,p)=>S.assessments.find(a=>a.athleteId===id&&a.period===p);
 function tsi(r){const v=CORE.map(c=>r[c.id]).filter(x=>typeof x==='number');return v.length?v.reduce((a,b)=>a+b,0)/v.length:null}
 const observed=r=>CORE.filter(c=>typeof r[c.id]==='number').length;
-const fmtR=v=>typeof v==='number'?v+'/4':(v==='NO'?'Not observed':'—');
+const fmtR=v=>typeof v==='number'?(v%1?v.toFixed(1):v)+'/4':(v==='NO'?'Not observed':'—');
 function editPeriod(a){return a.overdueFrom||PERIOD}
 function toast(m){const t=$('#toast');t.textContent=m;t.classList.add('on');clearTimeout(toast.h);toast.h=setTimeout(()=>t.classList.remove('on'),3200)}
 function daysTo(d){return Math.ceil((d-TODAY)/864e5)}
@@ -187,20 +187,29 @@ const myAthletes=()=>S.athletes.filter(a=>a.coach===myId()&&a.status!=='inactive
 const pill=x=>`<span class="pill ${x.k}"><span class="dot"></span>${esc(x.l)}</span>`;
 
 /* ============ CHARTS ============ */
-function radar(cur,prev){
-  const W=400,H=340,cx=200,cy=170,Rr=112,n=CORE.length;
+const CORE_AXES=CORE.map(c=>({k:c.id,s:c.s,n:c.n}));
+const styleAxes=k=>SETS[k].items.map(([id,l,sh])=>({k:k+'.'+id,s:sh||l,n:l}));
+function styleAvg(sr,k){const v=SETS[k].items.map(([id])=>sr&&sr[k+'.'+id]).filter(x=>typeof x==='number');return v.length?v.reduce((a,b)=>a+b,0)/v.length:undefined}
+// Styles shown in a report: the athlete's styles, plus any other style the coach rated.
+const reportStyles=(r,a)=>['GR','FS','FK'].filter(k=>(STYLESETS[a.style]||[]).includes(k)||styleAvg(r.styleRatings,k)!==undefined);
+// Overall web: the six core competencies plus one spoke per style (that style's average).
+function overallData(r,a,prev){const ks=reportStyles(r,a);const pack=(x,base)=>{if(!x)return null;const o={...x.ratings};ks.forEach(k=>{const v=styleAvg(x.styleRatings,k);o['avg.'+k]=v===undefined&&base?base['avg.'+k]:v});return o};
+  return {axes:[...CORE_AXES,...ks.map(k=>({k:'avg.'+k,s:SETS[k].name+' avg',n:SETS[k].name+' average (all '+SETS[k].name+' skills)'}))],cur:pack(r),prev:pack(prev,pack(r))}}
+function radar(cur,prev,AX,big){
+  AX=AX||CORE_AXES;
+  const W=400,H=340,cx=200,cy=170,Rr=112,n=AX.length,fs=big?17:n>9?11:12,pad=big?80:44;
   const ang=i=>-Math.PI/2+i*2*Math.PI/n;
   const P=(i,v)=>[cx+Math.cos(ang(i))*Rr*v/4,cy+Math.sin(ang(i))*Rr*v/4];
-  const num=v=>typeof v==='number'?v:0;
-  let s=`<svg viewBox="-44 0 ${W+88} ${H}" role="img" aria-label="Technical radar chart">`;
-  for(let l=1;l<=4;l++){s+=`<polygon points="${CORE.map((c,i)=>P(i,l).join(',')).join(' ')}" fill="${l%2?'rgba(255,255,255,.015)':'none'}" stroke="#35483B" stroke-width="1"/>`;
+  const num=v=>typeof v==='number'?v:0;cur=cur||{};
+  let s=`<svg viewBox="${-pad} 0 ${W+2*pad} ${H}" role="img" aria-label="Technical radar chart">`;
+  for(let l=1;l<=4;l++){s+=`<polygon points="${AX.map((c,i)=>P(i,l).join(',')).join(' ')}" fill="${l%2?'rgba(255,255,255,.015)':'none'}" stroke="#35483B" stroke-width="1"/>`;
     s+=`<text x="${cx+3}" y="${cy-Rr*l/4+4}" font-size="9.5" fill="#6f8275">${l}</text>`}
-  CORE.forEach((c,i)=>{const[x,y]=P(i,4);s+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#35483B"/>`;
+  AX.forEach((c,i)=>{const[x,y]=P(i,4);s+=`<line x1="${cx}" y1="${cy}" x2="${x}" y2="${y}" stroke="#35483B"/>`;
     const[lx,ly]=P(i,4.9);const anc=Math.abs(Math.cos(ang(i)))<.2?'middle':(Math.cos(ang(i))>0?'start':'end');
-    s+=`<text x="${lx}" y="${ly+4}" text-anchor="${anc}" font-size="12" fill="#B8CCBD" font-family="Inter">${c.s}</text>`});
-  if(prev)s+=`<polygon points="${CORE.map((c,i)=>P(i,num(prev[c.id])).join(',')).join(' ')}" fill="none" stroke="#9aa69e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
-  s+=`<polygon points="${CORE.map((c,i)=>P(i,num(cur[c.id])).join(',')).join(' ')}" fill="rgba(98,141,124,.32)" stroke="#8FB8A6" stroke-width="2"/>`;
-  CORE.forEach((c,i)=>{const[x,y]=P(i,num(cur[c.id]));s+=`<circle cx="${x}" cy="${y}" r="4.5" fill="#8FB8A6" stroke="#142019" stroke-width="1.5"><title>${c.n}: ${fmtR(cur[c.id])}${prev?' (previous '+fmtR(prev[c.id])+')':''}</title></circle>`});
+    s+=`<text x="${lx}" y="${ly+4}" text-anchor="${anc}" font-size="${fs}" fill="#B8CCBD" font-family="Inter">${c.s}</text>`});
+  if(prev)s+=`<polygon points="${AX.map((c,i)=>P(i,num(prev[c.k])).join(',')).join(' ')}" fill="none" stroke="#9aa69e" stroke-width="1.5" stroke-dasharray="5 4"/>`;
+  s+=`<polygon points="${AX.map((c,i)=>P(i,num(cur[c.k])).join(',')).join(' ')}" fill="rgba(98,141,124,.32)" stroke="#8FB8A6" stroke-width="2"/>`;
+  AX.forEach((c,i)=>{const[x,y]=P(i,num(cur[c.k]));s+=`<circle cx="${x}" cy="${y}" r="4.5" fill="#8FB8A6" stroke="#142019" stroke-width="1.5"><title>${c.n}: ${fmtR(cur[c.k])}${prev?' (previous '+fmtR(prev[c.k])+')':''}</title></circle>`});
   return s+'</svg>';
 }
 function lineChart(pts){
@@ -508,15 +517,21 @@ function reflectionBlock(a,r){
   <div class="grid g2">${qs.map(([k,l])=>`<div><label class="f" for="rf-${k}">${l}</label><textarea id="rf-${k}" rows="3"></textarea></div>`).join('')}</div>
   <button class="btn primary" style="margin-top:12px" data-act="sendrefl">Send to coach</button></div>`;
 }
+function webLegend(r,prev){return `<div class="legend" style="margin-bottom:6px"><span><svg width="18" height="10"><rect y="2" width="18" height="6" fill="rgba(98,141,124,.5)" stroke="#8FB8A6"/></svg>${monthLabel(r.period)}</span>${prev?`<span><svg width="18" height="10"><line x1="0" y1="5" x2="18" y2="5" stroke="#9aa69e" stroke-dasharray="4 3" stroke-width="1.5"/></svg>${monthLabel(prev.period)}</span>`:''}</div>`}
+function overallWebCard(r,a,prev){const o=overallData(r,a,prev);
+  return `<div class="card chart"><h3>Overall profile</h3><div class="xs muted" style="margin-bottom:6px">Core competencies plus the average of each style’s skills.</div>${webLegend(r,prev)}${radar(o.cur,o.prev,o.axes)}<div class="xs muted">Scale 0–4 · hover or tap a point for detail.</div></div>`}
+function styleWebs(r,a,prev){const ks=reportStyles(r,a);if(!ks.length)return '';
+  return `<div class="grid ${ks.length===1?'g2':ks.length===2?'g2':'g3'}" style="margin-top:16px">${ks.map(k=>{const av=styleAvg(r.styleRatings,k);
+    return `<div class="card chart"><h3>${SETS[k].name}</h3><div class="xs muted" style="margin-bottom:6px">${av===undefined?'Not rated in this report':'Style average '+av.toFixed(1)+' / 4'}</div>${av===undefined?'':radar(r.styleRatings,prev&&styleAvg(prev.styleRatings,k)!==undefined?prev.styleRatings:null,styleAxes(k),true)}</div>`}).join('')}</div>`}
 function perfTab(r,prev,a){
   const sets=STYLESETS[a.style]||[];
   return `<div class="grid g2" style="align-items:start">
-   <div class="card chart"><h3>Technical profile</h3><div class="legend" style="margin-bottom:6px"><span><svg width="18" height="10"><rect y="2" width="18" height="6" fill="rgba(98,141,124,.5)" stroke="#8FB8A6"/></svg>${monthLabel(r.period)}</span>${prev?`<span><svg width="18" height="10"><line x1="0" y1="5" x2="18" y2="5" stroke="#9aa69e" stroke-dasharray="4 3" stroke-width="1.5"/></svg>${monthLabel(prev.period)}</span>`:''}</div>${radar(r.ratings,prev?.ratings)}
-     <div class="xs muted">Scale 0–4 · hover or tap a point for detail.</div></div>
+   ${overallWebCard(r,a,prev)}
    <div class="card"><h3>Core competencies</h3>${CORE.map(c=>{const cv=r.ratings[c.id],pv=prev?.ratings[c.id];const t=trend(cv,pv);
      return `<div class="prow"><div class="top2"><b style="font-weight:500">${c.n}</b><span class="sm ${t.c}">${t.a} ${t.t}</span></div>${segBar(cv,pv)}
      <div class="xs muted">Previous ${fmtR(pv)} · Current <b style="color:var(--text)">${fmtR(cv)}</b>${typeof cv==='number'?' — '+SCALE[cv]:''}</div></div>`}).join('')}</div>
   </div>
+  ${styleWebs(r,a,prev)}
   ${sets.map(k=>{const rows=SETS[k].items.filter(([id])=>r.styleRatings[k+'.'+id]!==undefined);if(!rows.length)return '';
     return `<div class="card" style="margin-top:16px"><h3>${SETS[k].name} detail</h3><div class="grid g2" style="gap:0 28px">${rows.map(([id,l])=>{const cv=r.styleRatings[k+'.'+id],pv=prev?.styleRatings?.[k+'.'+id];const t=trend(cv,pv);
       return `<div class="prow"><div class="top2"><span>${l}</span><span class="xs ${t.c}">${t.a} ${fmtR(cv)}</span></div>${segBar(cv,pv)}</div>`}).join('')}</div></div>`}).join('')}
@@ -729,7 +744,9 @@ function errorView(){return `<div class="card" style="margin-top:40px;text-align
 function printableHTML(r,a,prev){
   const logo=new URL('logo.png',location.href).href;
   const ti=tsi(r.ratings),pt=prev?tsi(prev.ratings):null,ch=ti!=null&&pt!=null?ti-pt:null;
-  const rad=radar(r.ratings,prev?.ratings).replace(/#B8CCBD/g,'#2b3a30').replace(/#35483B/g,'#cdd6cf').replace(/rgba\(255,255,255,\.015\)/g,'none').replace(/#6f8275/g,'#7d8981').replace(/#9aa69e/g,'#8a948d').replace(/#8FB8A6/g,'#3f6b59').replace(/stroke="#142019"/g,'stroke="#ffffff"').replace(/rgba\(98,141,124,\.32\)/g,'rgba(63,107,89,.22)');
+  const light=svg=>svg.replace(/#B8CCBD/g,'#2b3a30').replace(/#35483B/g,'#cdd6cf').replace(/rgba\(255,255,255,\.015\)/g,'none').replace(/#6f8275/g,'#7d8981').replace(/#9aa69e/g,'#8a948d').replace(/#8FB8A6/g,'#3f6b59').replace(/stroke="#142019"/g,'stroke="#ffffff"').replace(/rgba\(98,141,124,\.32\)/g,'rgba(63,107,89,.22)');
+  const ov=overallData(r,a,prev);const rad=light(radar(ov.cur,ov.prev,ov.axes));
+  const webs=reportStyles(r,a).map(k=>{const av=styleAvg(r.styleRatings,k);return `<div class="web"><div class="sub" style="text-align:center">${SETS[k].name}${av===undefined?'':' · avg '+av.toFixed(1)}</div>${av===undefined?'<p style="text-align:center;font-size:8.5pt;color:#5d6b62">Not rated this month</p>':light(radar(r.styleRatings,prev&&styleAvg(prev.styleRatings,k)!==undefined?prev.styleRatings:null,styleAxes(k),true))}</div>`}).join('');
   const dots=v=>[1,2,3,4].map(i=>`<i class="${typeof v==='number'&&i<=v?'f':''}"></i>`).join('');
   const skillRows=CORE.map(c=>{const cv=r.ratings[c.id],pv=prev?.ratings[c.id];const t=trend(cv,pv);
     return `<tr><td>${c.n}</td><td class="c">${fmtR(pv)}</td><td class="c"><b>${fmtR(cv)}</b></td><td><span class="dots">${dots(cv)}</span></td><td>${t.a} ${t.t}</td></tr>`}).join('');
@@ -770,6 +787,7 @@ table{border-collapse:collapse;width:100%}
 .sk th,.sk td{padding:4px 6px;border-bottom:1px solid #e1e6e2;font-size:9pt;text-align:left}
 .sk th{font-size:7.5pt;letter-spacing:.1em;text-transform:uppercase;color:#5d6b62}.c{text-align:center!important}
 .dots{display:inline-flex;gap:2px}.dots i{width:14px;height:6px;border:1px solid #9aa79e;border-radius:2px}.dots i.f{background:#3f6b59;border-color:#3f6b59}
+.webs{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;break-inside:avoid}.webs svg{width:100%;height:auto}
 .sub{font-size:8pt;font-weight:700;margin:8px 0 3px;color:#2b3a30}
 .sgrid{display:grid;grid-template-columns:repeat(3,1fr);gap:2px 14px;font-size:8.5pt}
 .sgrid div{display:flex;justify-content:space-between;border-bottom:1px dotted #d3dad5;padding:2px 0}
@@ -787,7 +805,7 @@ table{border-collapse:collapse;width:100%}
 footer{margin-top:16px;padding-top:6px;border-top:1px solid #c9d2cb;font-size:7.5pt;color:#5d6b62;display:flex;justify-content:space-between;gap:10px}
 .box,.two,.perf,.metrics{break-inside:avoid}
 @media print{body{background:#fff}.bar{display:none}.sheet{margin:0;padding:0;box-shadow:none;max-width:none}}
-@media(max-width:700px){.sheet{padding:20px;margin:0}.two,.perf{grid-template-columns:1fr}.meta{grid-template-columns:1fr 1fr}.sgrid{grid-template-columns:1fr 1fr}}
+@media(max-width:700px){.sheet{padding:20px;margin:0}.two,.perf,.webs{grid-template-columns:1fr}.meta{grid-template-columns:1fr 1fr}.sgrid{grid-template-columns:1fr 1fr}}
 </style></head><body>
 <div class="bar"><span>Ready to print</span><button onclick="window.print()">Print report</button></div>
 <div class="sheet">
@@ -800,9 +818,10 @@ footer{margin-top:16px;padding-top:6px;border-top:1px solid #c9d2cb;font-size:7.
 <h2>Where you stand</h2><p>${esc(r.stand)}</p>
 <div class="two" style="margin-top:10px"><div class="box"><h3>What is going well</h3><p>${esc(r.well)}</p></div><div class="box t"><h3>Tough truths</h3><p>${esc(r.tough)}</p></div></div>
 <h2>Recommended adjustments</h2><div class="two"><div><b style="font-size:8.5pt">What your coach will change</b><p>${esc(r.adjCoach)}</p></div><div><b style="font-size:8.5pt">What you need to do</b><p>${esc(r.adjAthlete)}</p></div></div>
-<h2>Technical profile</h2>
+<h2>Overall profile</h2><div style="font-size:8pt;color:#5d6b62;margin:-4px 0 4px">Core competencies plus the average of each style’s skills.</div>
 <div class="perf"><div>${rad}<div style="font-size:7.5pt;color:#5d6b62;text-align:center">Solid: ${monthLabel(r.period)}${prev?' · Dashed: '+monthLabel(prev.period):''}</div></div>
 <table class="sk"><tr><th>Skill</th><th class="c">Prev.</th><th class="c">Now</th><th></th><th>Change</th></tr>${skillRows}</table></div>
+${webs?`<h2>Style profiles</h2><div class="webs">${webs}</div>`:''}
 ${styleRows}
 <div style="font-size:7.5pt;color:#5d6b62;margin-top:6px">Scale: 0 Not yet introduced · 1 Developing · 2 Consistent in controlled drilling · 3 Effective vs. live resistance · 4 Reliable in competition. Skills not observed are not scored.</div>
 <h2>Next 30 days</h2>${goals||'<p>No goals set.</p>'}
@@ -963,7 +982,7 @@ const ACT={
   savedraft:async()=>{const d=curDraft();if(!d)return;dirty=true;await flushDraft();if(!dirty)toast('Draft saved')},
   preview:()=>{const d=curDraft();const a=ath(U().open);
     modal(`<div class="mh"><div><div class="up xs" style="color:var(--amber)">Preview · not visible to family</div><h3 style="margin-top:4px">${esc(a.name)} — ${monthLabel(d.period)}</h3></div><button class="btn sm" data-act="closemodal">Close</button></div>
-     ${reportBody(d,a,prevPub(a.id,d.period))}<div class="card chart" style="margin-top:16px"><h3>Technical profile</h3>${radar(d.ratings,prevPub(a.id,d.period)?.ratings)}</div>`)},
+     ${reportBody(d,a,prevPub(a.id,d.period))}<div style="margin-top:16px">${overallWebCard(d,a,prevPub(a.id,d.period))}</div>${styleWebs(d,a,prevPub(a.id,d.period))}`)},
   closemodal:(t,e)=>{if(SESSION?.user?.user_metadata?.temp_password&&$('#pw1'))return;if(e.target===t||t.tagName==='BUTTON')$('#modal').innerHTML=''},
   approve:async()=>{const d=curDraft();const m=validate(d);if(m.length){toast('Still needed: '+m.join(', '));return}
     await flushDraft();if(dirty)return;
