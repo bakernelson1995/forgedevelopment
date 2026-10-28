@@ -296,3 +296,22 @@ table.t select{width:auto;max-width:220px;padding:6px 8px;font-size:13px}
 .dl-empty{font-size:13px;color:var(--muted);margin-top:10px}
 .pill.notyet{color:var(--muted)}
 tr.row-bad td{background:rgba(214,120,92,.07)}
+
+/* development stages */
+.stagecard h4{margin-bottom:4px}
+.stages{display:flex;flex-direction:column;gap:6px;margin-top:10px}
+.stage{display:grid;grid-template-columns:34px minmax(0,1fr) auto;gap:10px;align-items:center;width:100%;text-align:left;padding:9px 10px;border-radius:10px;border:1px solid var(--border);background:var(--bg);cursor:pointer;color:var(--text)}
+.stage:hover{border-color:var(--accent2)}
+.stage.mine{border-color:var(--accent2);background:var(--panel);box-shadow:inset 0 0 0 1px var(--accent2)}
+.stage .sn{width:30px;height:30px;border-radius:8px;display:grid;place-items:center;font-family:Archivo,Inter,sans-serif;font-weight:800;background:var(--bg2);border:1px solid var(--border);color:var(--sage)}
+.stage.mine .sn{background:var(--accent);border-color:var(--accent);color:#0f1a14}
+.stage .st{display:flex;flex-direction:column;min-width:0}
+.stage .st b{font-size:13.5px;font-weight:600;text-transform:uppercase;letter-spacing:.04em}
+.stage .st span{font-size:12px;color:var(--muted)}
+.stage .tags{display:flex;gap:4px;flex-wrap:wrap;justify-content:flex-end}
+.tag{font-style:normal;font-size:10.5px;font-weight:600;letter-spacing:.06em;text-transform:uppercase;padding:2px 7px;border-radius:99px;border:1px solid}
+.tag.tc{color:var(--accent2);border-color:rgba(143,184,166,.5)}
+.tag.tf{color:#d7c9a3;border-color:rgba(215,201,163,.45)}
+.stage-talk{margin:10px 0 4px;padding:10px 12px;border-radius:10px;background:var(--amberbg);border:1px solid rgba(208,170,98,.45);font-size:13.5px}
+.stage-talk b{color:var(--amber)}
+.pill.mismatch{color:#d7c9a3;border-color:rgba(215,201,163,.4)}

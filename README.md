@@ -16,6 +16,7 @@ It is a standalone site for now. Later, the RWC website can simply link to it
 | `public/config.js` | The only file you edit: your Supabase address and public key. |
 | `supabase/schema.sql` | Creates the database and the rules for who can see what. |
 | `supabase/coach-requests.sql` | Adds coach profiles and family coach requests (run after `schema.sql`). |
+| `supabase/stages.sql` | Adds the 5-stage development ladder (run after `coach-requests.sql`). |
 | `supabase/functions/manage-login/index.ts` | Lets an admin create sign-ins and reset passwords from the portal. |
 | `supabase/functions/send-notifications/index.ts` | Sends "new report / request / meeting" emails. |
 

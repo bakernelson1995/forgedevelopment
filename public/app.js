@@ -31,6 +31,14 @@ const STYLES=['Greco-Roman','Freestyle','Folkstyle','Freestyle & Greco-Roman','A
 const STYLESETS={'Greco-Roman':['GR'],'Freestyle':['FS'],'Folkstyle':['FK'],'Freestyle & Greco-Roman':['GR','FS'],'All Three Styles':['GR','FS','FK']};
 const GOAL_ST=['Not Started','In Progress','Demonstrated','Needs Revision','Completed'];
 const CATS=CORE.map(c=>c.n);
+const STAGES=[
+ {n:1,t:'Physical Literacy',d:'Movement, coordination, confidence and fun'},
+ {n:2,t:'Wrestling Foundations',d:'Position, movement, control and mat awareness'},
+ {n:3,t:'Style Exploration',d:'Freestyle and Greco technical foundations'},
+ {n:4,t:'Regional Performance',d:'Advanced freestyle and Greco training'},
+ {n:5,t:'National Performance',d:'National and international competition'}];
+const stageName=n=>{const x=STAGES.find(s=>s.n===n);return x?`Stage ${x.n} · ${x.t}`:''};
+const stagesDiffer=a=>a.coachStage&&a.familyStage&&a.coachStage!==a.familyStage;
 const SUB_ST={test:'Test activation',active:'Active',grace:'Payment issue · grace period',inactive:'Inactive'};
 function g(title,category,behavior,measure,review,coachRec,commit,status){return {title,category,behavior,measure,review,coachRec,commit,status}}
 
@@ -120,7 +128,7 @@ async function loadAll(){
   GUARDIANS={};
   S.athletes=athletes.map(a=>{const ls=links.filter(l=>l.athlete_id===a.id);const gs=ls.map(l=>P[l.guardian_id]).filter(Boolean);
     GUARDIANS[a.id]=ls.map(l=>{const p=P[l.guardian_id];return p&&{id:p.id,name:p.full_name,rel:l.relationship,email:p.email,phone:p.phone||'',pref:p.contact_pref||'Email',best:p.best_time||'',notify:p.notify_email}}).filter(Boolean);
-    return {id:a.id,name:a.full_name,style:a.primary_style,coach:a.coach_id,aff:a.affiliation,stage:a.stage,status:a.status,created:a.created_at,family:familyName(a,gs),guardianIds:gs.map(x=>x.id)}});
+    return {id:a.id,name:a.full_name,style:a.primary_style,coach:a.coach_id,aff:a.affiliation,stage:a.stage,coachStage:a.coach_stage||null,familyStage:a.family_stage||null,status:a.status,created:a.created_at,family:familyName(a,gs),guardianIds:gs.map(x=>x.id)}});
   S.requests=creqs.map(r=>({id:r.id,athleteId:r.athlete_id,coach:r.coach_id,byName:r.requester_name||'A Forge family',note:r.note||'',status:r.status,ts:r.created_at,decided:r.decided_at}));
   S.athletes.forEach(a=>{
     // Reports are owed from the month the current coach took the athlete on (after the 15th → starting next month).
@@ -147,7 +155,7 @@ async function run(fn,okMsg){
 function log(_actor,action){if(sb&&S.me)sb.from('audit_log').insert({actor_id:S.me.id,action}).then(()=>{},()=>{})}
 function sendQueued(){if(sb&&EMAILS)sb.functions.invoke('send-notifications').then(()=>{},()=>{})}
 
-const needsAction=t=>t.some(x=>x.k!=='published'&&x.k!=='notyet');
+const needsAction=t=>t.some(x=>!['published','notyet','mismatch'].includes(x.k));
 function tasksFor(a){
   const t=[];const ep=editPeriod(a);
   if(ep!==PERIOD){t.push({k:'overdue',l:a.overdue.length>1?'Overdue · '+a.overdue.length+' reports':'Overdue · '+monthShort(ep)+' report'})}
@@ -161,6 +169,7 @@ function tasksFor(a){
   return t.concat(extraTasks(a));
 }
 function extraTasks(a){const t=[];
+  if(stagesDiffer(a)) t.push({k:'mismatch',l:'Stage views differ'});
   if(S.reflections.some(r=>r.athleteId===a.id&&!r.ack)||asksFor(a.id).some(q=>q.reply&&!q.seen)) t.push({k:'parent',l:'Parent Response Pending'});
   if(S.meetings.some(m=>m.athleteId===a.id&&m.status==='requested')) t.push({k:'meeting',l:'Meeting Requested'});
   return t;
@@ -381,7 +390,7 @@ function goalEditor(gl,i){
 }
 function wsAside(a,lp,refl,mt,d){
   const lpR=lp?lp.ratings:null;
-  return `<aside class="aside">${contactCard(a)}
+  return `<aside class="aside">${stageCard(a,'coach')}${contactCard(a)}
    <div class="card"><h4>Latest published report</h4>${lp?`<div style="display:flex;justify-content:space-between;align-items:baseline"><b>${monthLabel(lp.period)}</b><span class="sm muted">Index ${tsi(lpR)!=null?tsi(lpR).toFixed(1):'—'}</span></div>
      ${CORE.map(c=>`<div class="mini"><span class="muted">${c.s}</span><span class="t"><i style="width:${(typeof lpR[c.id]==='number'?lpR[c.id]:0)*25}%"></i></span><span>${typeof lpR[c.id]==='number'?lpR[c.id]:'–'}</span></div>`).join('')}`:'<div class="muted sm">No published reports yet.</div>'}</div>
    <div class="card"><h4>Previous goals</h4>${lp&&lp.goals.length&&lp!==d?lp.goals.map((gl,i)=>`<div style="margin-bottom:10px"><div class="sm"><b>${esc(gl.title)}</b></div><select class="sm" style="margin-top:4px;padding:5px 8px" data-gs="${lp.id}|${i}" aria-label="Update goal status">${GOAL_ST.map(s=>`<option ${gl.status===s?'selected':''}>${s}</option>`).join('')}</select></div>`).join(''):'<div class="muted sm">No earlier goals to review.</div>'}</div>
@@ -394,6 +403,20 @@ function wsAside(a,lp,refl,mt,d){
      ${m.status==='confirmed'&&past?`<label class="f" for="sum-${m.id}" style="margin-top:8px">Meeting summary (the family sees this)</label><textarea id="sum-${m.id}" rows="2"></textarea><button class="btn sm" style="margin-top:6px" data-act="donemtg" data-id="${m.id}">Save summary & mark held</button>`:''}
      ${m.summary?`<p class="sm muted" style="margin:4px 0 0">${esc(m.summary)}</p>`:''}</div>`}).join(''):'<div class="muted sm">None.</div>'}</div>
   </aside>`;
+}
+
+/* ============ DEVELOPMENT STAGE (coach + family views) ============ */
+function stageCard(a,who){
+  const c=a.coachStage,f=a.familyStage,mine=who==='coach'?c:f,k=esc(firstName(a.name)),cn=esc(coach(a.coach).name);
+  const note=stagesDiffer(a)?`<div class="stage-talk"><b>Talking point.</b> ${who==='coach'?`The family sees ${k} at Stage ${f}; you see Stage ${c}.`:`You see ${k} at Stage ${f}; ${cn} sees Stage ${c}.`} A good thing to talk through at your next development meeting.</div>`
+    :c&&f?`<div class="sm up-c" style="margin:8px 0 4px">${who==='coach'?'You and the family':'You and '+cn} agree: ${stageName(c)}.</div>`
+    :`<div class="sm muted" style="margin:8px 0 4px">${!mine?'Tap the stage that best describes '+k+' right now.':who==='coach'?'The family hasn’t picked a stage yet.':cn+' hasn’t picked a stage yet.'}</div>`;
+  return `<div class="card stagecard noprint"><h4>Development stage</h4>
+    <div class="xs muted">${who==='coach'?'You and the family each pick a stage. If you differ, it shows up here as a talking point.':'You and '+cn+' each pick a stage. If you see it differently, that’s worth a conversation.'}</div>
+    ${note}
+    <div class="stages" role="radiogroup" aria-label="Development stage">${STAGES.slice().reverse().map(st=>`<button class="stage ${mine===st.n?'mine':''}" role="radio" aria-checked="${mine===st.n}" data-act="setstage" data-a="${a.id}" data-v="${st.n}">
+      <span class="sn">${st.n}</span><span class="st"><b>${st.t}</b><span>${st.d}</span></span>
+      <span class="tags">${c===st.n?'<i class="tag tc">Coach</i>':''}${f===st.n?'<i class="tag tf">Family</i>':''}</span></button>`).join('')}</div></div>`;
 }
 
 /* ============ REPORT (shared by parent view & preview) ============ */
@@ -457,8 +480,8 @@ function parentView(){
   const tabs=[['overview','Overview'],['performance','Performance'],['blueprint','Development Blueprint'],['history','Progress History'],['meetings','Meetings']];
   const isNew=r&&!r.ts.ack;
   let body='';
-  if(!r&&tab!=='meetings') body='<div class="empty">Your first report will appear here once your coach publishes it.</div>'+notifCard(a);
-  else if(tab==='overview') body=reportBody(r,a,prev)+reflectionBlock(a,r)+notifCard(a);
+  if(!r&&tab!=='meetings') body='<div class="empty">Your first report will appear here once your coach publishes it.</div>'+stageCard(a,'family')+notifCard(a);
+  else if(tab==='overview') body=reportBody(r,a,prev)+stageCard(a,'family')+reflectionBlock(a,r)+notifCard(a);
   else if(tab==='performance') body=perfTab(r,prev,a);
   else if(tab==='blueprint') body=blueprint(r,prev);
   else if(tab==='history') body=historyTab(a);
@@ -468,7 +491,7 @@ function parentView(){
   ${parentAsks(a)}
   ${isNew?`<div class="banner good noprint"><b>New report from ${esc(coach(r.coach||a.coach).name)}</b> — ${monthLabel(r.period)}, published ${fd(r.ts.published)}.<button class="btn sm" data-act="ackreport" style="margin-left:auto">Mark as read</button></div>`:''}
   <div class="hero"><div class="kick"><img alt="The Forge" src="logo.png">Athlete Development Report</div><h1>${esc(a.name)}</h1>
-    <div class="meta"><div><span>Primary style</span><b>${esc(a.style)}</b></div><div><span>Assigned coach</span><b>${esc(coach(a.coach).name)}</b><button class="linkbtn noprint" style="display:block;margin-top:2px;font-size:12px" data-act="choosecoach">${S.requests.some(x=>x.athleteId===a.id&&x.status==='pending')?'Coach request pending':'Request a different coach'}</button></div><div><span>Reporting month</span><b>${r?monthLabel(r.period):'—'}</b></div><div><span>Developmental stage</span><b>${esc(a.stage)}</b></div><div><span>Status</span><b>${r?'Published '+fd(r.ts.published,{month:'short',day:'numeric'}):'Pending'}</b></div></div>
+    <div class="meta"><div><span>Primary style</span><b>${esc(a.style)}</b></div><div><span>Assigned coach</span><b>${esc(coach(a.coach).name)}</b><button class="linkbtn noprint" style="display:block;margin-top:2px;font-size:12px" data-act="choosecoach">${S.requests.some(x=>x.athleteId===a.id&&x.status==='pending')?'Coach request pending':'Request a different coach'}</button></div><div><span>Reporting month</span><b>${r?monthLabel(r.period):'—'}</b></div><div><span>Development stage</span><b>${a.coachStage?esc(stageName(a.coachStage)):'Not set yet'}</b>${stagesDiffer(a)?'<span class="xs" style="display:block;color:var(--amber)">You picked Stage '+a.familyStage+'</span>':''}</div><div><span>Status</span><b>${r?'Published '+fd(r.ts.published,{month:'short',day:'numeric'}):'Pending'}</b></div></div>
   </div>
   <div style="display:flex;align-items:center;gap:8px;margin-bottom:0" class="noprint">
     <div class="tabs" role="tablist" style="flex:1">${tabs.map(([k,l])=>`<button class="tab ${tab===k?'on':''}" role="tab" aria-selected="${tab===k}" data-act="tab" data-v="${k}">${l}</button>`).join('')}</div>
@@ -616,7 +639,7 @@ function adminAthletes(){
       <div><label class="f" for="na-style">Primary style</label><select id="na-style">${STYLES.map(s=>`<option>${s}</option>`).join('')}</select></div>
       <div><label class="f" for="na-coach">Primary coach</label><select id="na-coach">${coachOpts('')}</select></div>
       <div><label class="f" for="na-aff">Home club or school (optional)</label><input type="text" id="na-aff" value="Rochelle Wrestling Club"></div>
-      <div><label class="f" for="na-stage">Developmental stage</label><input type="text" id="na-stage" value="New to The Forge"></div>
+      <div><label class="f" for="na-stage">Starting stage (coach view, optional)</label><select id="na-stage"><option value="">— Coach decides —</option>${STAGES.map(st=>`<option value="${st.n}">${esc(stageName(st.n))}</option>`).join('')}</select></div>
       <div><label class="f" for="na-status">Subscription</label><select id="na-status">${Object.entries(SUB_ST).map(([k,l])=>`<option value="${k}">${l}</option>`).join('')}</select></div>
       <div><label class="f" for="na-g1">Guardian</label><select id="na-g1">${gOpts}</select></div>
       <div><label class="f" for="na-r1">Relationship</label><input type="text" id="na-r1" value="Parent"></div>
@@ -625,7 +648,7 @@ function adminAthletes(){
     </div>
     <button class="btn primary" style="margin-top:12px" data-act="addathlete">Add athlete</button></div>
   <div class="card"><h3>All athletes</h3>${S.athletes.length?`<div class="tscroll"><table class="t"><thead><tr><th>Athlete</th><th>Coach</th><th>Subscription</th><th>Guardians</th></tr></thead><tbody>
-    ${S.athletes.map(a=>`<tr><td><b>${esc(a.name)}</b><div class="xs muted">${esc(a.style)} · ${esc(a.aff)}</div></td>
+    ${S.athletes.map(a=>`<tr><td><b>${esc(a.name)}</b><div class="xs muted">${esc(a.style)} · ${esc(a.aff)}</div><div class="xs ${stagesDiffer(a)?'down-c':'muted'}">Stage: coach ${a.coachStage||'—'} · family ${a.familyStage||'—'}</div></td>
       <td><select data-aset="coach_id" data-id="${a.id}" aria-label="Coach for ${esc(a.name)}">${coachOpts(a.coach)}</select></td>
       <td><select data-aset="status" data-id="${a.id}" aria-label="Subscription for ${esc(a.name)}">${Object.entries(SUB_ST).map(([k,l])=>`<option value="${k}" ${a.status===k?'selected':''}>${l}</option>`).join('')}</select></td>
       <td>${(GUARDIANS[a.id]||[]).map(gd=>`<div class="sm">${esc(gd.name)} <span class="xs muted">· ${esc(gd.rel)}</span> <button class="linkbtn" data-act="unlink" data-a="${a.id}" data-g="${gd.id}" aria-label="Unlink ${esc(gd.name)}">unlink</button></div>`).join('')||'<span class="xs down-c">No guardian linked</span>'}
@@ -770,7 +793,7 @@ footer{margin-top:16px;padding-top:6px;border-top:1px solid #c9d2cb;font-size:7.
 <div class="sheet">
 <header><img alt="The Forge" src="${logo}"><div class="k">Athlete Development Report<br>Rochelle Wrestling Club</div></header>
 <h1>${esc(a.name)}</h1>
-<div class="meta"><div><span>Reporting month</span>${monthLabel(r.period)}</div><div><span>Primary style</span>${esc(a.style)}</div><div><span>Coach</span>${esc(c)}</div><div><span>Developmental stage</span>${esc(a.stage)}</div></div>
+<div class="meta"><div><span>Reporting month</span>${monthLabel(r.period)}</div><div><span>Primary style</span>${esc(a.style)}</div><div><span>Coach</span>${esc(c)}</div><div><span>Development stage</span>${a.coachStage?esc(stageName(a.coachStage)):'Not set'}${a.familyStage?'<br><small>Family view: Stage '+a.familyStage+'</small>':''}</div></div>
 <div class="metrics"><div><span>Technical Skill Index</span><b>${ti!=null?ti.toFixed(1):'—'} / 4</b><small>Average of ${observed(r.ratings)} observed core ratings. Not a ranking or prediction.</small></div>
 <div><span>Change since previous</span><b>${ch==null?'—':(ch>0?'+':'')+ch.toFixed(1)}</b><small>${prev?'Compared with '+monthLabel(prev.period):'First assessment'}</small></div>
 <div><span>Active goals</span><b>${r.goals.filter(x=>x.status!=='Completed').length}</b><small>Review by ${r.goals[0]?fd(r.goals[0].review):'—'}</small></div></div>
@@ -952,6 +975,7 @@ const ACT={
     const ok=await run(()=>q(sb.from('assessments').update({status:'published'}).eq('id',d.id).select('id')),'Published — the '+a.family+' can see it now');
     $('#modal').innerHTML='';if(ok)sendQueued()},
   tab:t=>{U().tab=t.dataset.v;render()},
+  setstage:t=>{const n=Number(t.dataset.v);run(()=>q(sb.rpc('set_athlete_stage',{p_athlete:t.dataset.a,p_stage:n})),'Saved: '+stageName(n))},
   choosecoach:()=>{U().choosing=true;render();scrollTo(0,0)},
   cancelchoose:()=>{U().choosing=false;render();scrollTo(0,0)},
   reqcoach:async t=>{const a=curKid();const c=coach(t.dataset.c);t.disabled=true;
@@ -1008,7 +1032,7 @@ const ACT={
   toggleperson:t=>{const p=person(t.dataset.id);run(async()=>{await q(sb.from('people').update({active:!p.active}).eq('id',p.id).select('id'));log(null,(p.active?'Turned off':'Turned on')+' access — '+p.full_name)},p.active?'Access turned off':'Access turned on')},
   addathlete:()=>{const name=val('na-name');if(!name){toast('Enter the athlete’s name');return}
     const g1=val('na-g1'),g2=val('na-g2');
-    run(async()=>{const [row]=await q(sb.from('athletes').insert({full_name:name,primary_style:val('na-style'),coach_id:val('na-coach')||null,affiliation:val('na-aff')||'Independent',stage:val('na-stage')||'New to The Forge',status:val('na-status')||'test'}).select('id'));
+    run(async()=>{const [row]=await q(sb.from('athletes').insert({full_name:name,primary_style:val('na-style'),coach_id:val('na-coach')||null,affiliation:val('na-aff')||'Independent',coach_stage:val('na-stage')?Number(val('na-stage')):null,status:val('na-status')||'test'}).select('id'));
       const links=[[g1,val('na-r1')],[g2,val('na-r2')]].filter(([gid],i,arr)=>gid&&arr.findIndex(x=>x[0]===gid)===i).map(([gid,rel])=>({athlete_id:row.id,guardian_id:gid,relationship:rel||'Parent'}));
       if(links.length)await q(sb.from('athlete_guardians').insert(links).select('athlete_id'));log(null,'Added athlete — '+name)},name+' added')},
   link:t=>{const aid=t.dataset.id;const gid=val('lg-'+aid);if(!gid){toast('Choose a guardian');return}
