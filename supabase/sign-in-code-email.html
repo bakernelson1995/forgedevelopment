@@ -1,0 +1,18 @@
+<!-- Paste into Supabase: Authentication → Emails → Templates → "Magic Link".
+     Subject:  Your Forge sign-in code: {{ .Token }}
+     Also paste it into the "Confirm signup" template (first-time sign-ins use that one). -->
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f1f4f0;padding:24px 12px;font-family:Helvetica,Arial,sans-serif;color:#18231c">
+  <tr><td align="center">
+    <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:480px;background:#ffffff;border-radius:10px;overflow:hidden">
+      <tr><td style="background:#142019;padding:18px 24px;color:#F1F4F0;font-weight:800;letter-spacing:.16em;font-size:15px">THE FORGE
+        <div style="font-weight:400;letter-spacing:.12em;font-size:10px;color:#AAB8AD;margin-top:2px">ATHLETE DEVELOPMENT PORTAL</div></td></tr>
+      <tr><td style="padding:24px">
+        <p style="font-size:15px;margin:0 0 14px">Here is your sign-in code:</p>
+        <div style="font-size:34px;font-weight:800;letter-spacing:.3em;background:#f1f4f0;border-radius:8px;padding:14px 0;text-align:center">{{ .Token }}</div>
+        <p style="font-size:13px;color:#5d6b62;margin:16px 0 0">It expires in 10 minutes and works once. Never share it. Forge staff will never ask for it.
+        If you didn't try to sign in, you can ignore this email.</p>
+      </td></tr>
+      <tr><td style="padding:14px 24px;background:#f6f8f6;font-size:11px;color:#5d6b62">The Forge · Rochelle Wrestling Club · 1135 Lincoln Hwy, Rochelle, IL 61068</td></tr>
+    </table>
+  </td></tr>
+</table>
